@@ -26,6 +26,8 @@ python3 scripts/audit.py --source /path/to/pc-a --source /path/to/pc-b --days 30
 
 ## 別のPC・サーバーから自動取得
 
+Web画面への自動同期を使いたい場合は、後述の「どのPCからもWebで確認する」を使ってください。この節は監査実行時に別端末から取得する方式です。
+
 一度取得先を登録すると、通常の監査コマンドやスキルの実行時に毎回取得して統合集計します。アカウントへのログインだけで端末を発見する機能ではありません。
 
 ```bash
@@ -59,7 +61,33 @@ SSH取得した元JSONLと私的な取得記録は `~/.claude-history-audit/coll
 | Enterpriseの対象セッション履歴 | 有効化されたCompliance APIと専用権限で公式取得が可能 |
 | 組織の利用量・費用・活動指標 | 契約に対応するAnalytics API・管理画面で確認 |
 
-Enterpriseも履歴が端末にしかない、という説明は正しくありません。[公式のセッション取得API](https://platform.claude.com/docs/en/manage-claude/compliance-sessions)には保存期間・認証方法・ZDR等による対象外があります。[Analytics APIの選び方](https://platform.claude.com/docs/en/manage-claude/analytics-api)も参照してください。**現版のツールはSSH/パス収集に対応し、これらの公式APIコネクターは未実装です。** 個人Pro/Maxのログイン情報から組織APIを呼び出すことはしません。
+Enterpriseも履歴が端末にしかない、という説明は正しくありません。[公式のセッション取得API](https://platform.claude.com/docs/en/manage-claude/compliance-sessions)には保存期間・認証方法・ZDR等による対象外があります。[Analytics APIの選び方](https://platform.claude.com/docs/en/manage-claude/analytics-api)も参照してください。**現版はSSH/パス収集と端末からの数値同期に対応し、これらの公式APIコネクターは未実装です。** 個人Pro/Maxのログイン情報から組織APIを呼び出すことはしません。
+
+## どのPCからもWebで確認する
+
+別リポジトリ [claude-history-audit-web](https://github.com/fuji-kai-keiba/claude-history-audit-web) の非公開Web画面を利用します。WebへのログインはChatGPTアカウントです。Claudeのログインや契約とは別で、Claudeの認証情報は取得しません。
+
+1. 利用しているPCでWeb画面にログインし、「PCを追加」から設定ZIPをダウンロードする。
+2. ZIPを展開する。WindowsはPython 3.9以降を用意し、`install-windows.cmd` を実行する。
+3. 初回同期が終わると、Windowsにログイン中は15分ごとに更新する。各PCで一度設定すれば、どのPCのブラウザからも統合結果を確認できる。
+
+同期先はダウンロード設定のHTTPSサイトに限定します。送るのは日時・モデル・トークン数・監査件数とHMACで仮名化したIDです。会話本文・パス・元ID・ローカル証拠マップ・Claudeの認証情報は送信しません。通常のオフラインレポートは従来どおり実行ごとのIDですが、Web同期は同じ利用者のPC間で安定したIDを使い、コピーした履歴の二重計上を防ぎます。
+
+未登録PCや削除済みの履歴をアカウントから復元するものではありません。WindowsとWSLは履歴の保存環境が異なります。WSLで使っている場合はWSL内で下記を実行します。Mac/Linux/WSLの定期実行は現版では自動登録しません。
+
+```bash
+python3 audit-agent.pyz install --config device.json
+python3 audit-agent.pyz sync --config device.json
+python3 audit-agent.pyz status --config device.json
+```
+
+独自の履歴保存先は導入時に `--source /path/to/projects`（複数可）を指定すると保存します。通常はそのユーザーの `CLAUDE_CONFIG_DIR/projects` または `~/.claude/projects`。SSHの取得先設定はWeb同期に適用しません。
+
+導入先はWindowsの `%LOCALAPPDATA%\ClaudeHistoryAudit`、Mac/Linuxの `~/.claude-history-audit/device`。Windowsタスクは `ClaudeHistoryAudit-<端末ID>`。`device.json` とダウンロードZIPは接続鍵を含むため、共有やGitへの追加をしないでください。同期停止はWebの「接続を解除」、ローカルタスク削除は `python audit-agent.pyz uninstall --config device.json`。設定ファイルや受信済みの集計は自動削除しません。
+
+接続できない場合は次回の定期実行で再試行します。全分割データの受信が確認できるまで成功にしません。各回、端末に残る履歴全体を集計・送信するため、大規模利用では差分同期への拡張が必要です。Webに既に届いた使用量は端末側の履歴削除後も残ります。
+
+配布ツールの生成: `python3 scripts/build_agent.py --output /tmp/audit-agent.pyz`。標準ライブラリのみの独立したPythonアプリになります。
 
 ## Claude Codeから使う
 

@@ -173,14 +173,17 @@ def estimate(request, prices):
     return [(base + known + unknown * low) / 1e6, (base + known + unknown * high) / 1e6]
 
 
-def audit(sources, since=None, until=None, prices=None, now=None):
+def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None):
     now = now or datetime.now(UTC)
     files, skipped, source_errors = discover(sources)
     if not files:
         raise ValueError("対象のJSONL履歴が見つかりません。--source で保存先を指定してください。")
-    salt = secrets.token_bytes(32)
+    if identity_key is not None and (not isinstance(identity_key, bytes) or len(identity_key) != 32):
+        raise ValueError("同期用識別キーの形式が不正です。")
+    salt = identity_key or secrets.token_bytes(32)
     def alias(kind, raw):
-        return kind + "-" + hmac.new(salt, str(raw).encode(), hashlib.sha256).hexdigest()[:12]
+        digest = hmac.new(salt, str(raw).encode(), hashlib.sha256).hexdigest()
+        return kind + "-" + (digest if identity_key else digest[:12])
     stats = Counter(files_found=len(files), skipped_symlinks=skipped, source_errors=source_errors)
     requests = {}
     sessions = {}

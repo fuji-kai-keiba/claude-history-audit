@@ -23,6 +23,9 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "sources":
         return sources_main(argv[1:])
+    if argv and argv[0] == "cloud":
+        from .sync import main as sync_main
+        return sync_main(argv[1:])
     parser = argparse.ArgumentParser(description="Claude Code履歴を監査。登録済みSSH先は自動取得。履歴変更・LLM呼び出しなし。")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--source", action="append", type=Path, help="JSONLファイルまたはフォルダ。複数指定可。既定: CLAUDE_CONFIG_DIR/projects または ~/.claude/projects")

@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,7 +50,22 @@ def main():
         combined = json.loads((folder / "collected/report.json").read_text())
         assert combined["collection"]["successful"] == 1
         assert combined["coverage"]["unique_requests"] == 1
-    print("PASS: portable skill install, CLI, four reports, cost coverage, privacy, read-only input, overwrite protection, automatic source registry")
+        # The distributed agent must run outside the checkout with no dependencies.
+        bundle = folder / 'audit-agent.pyz'
+        subprocess.run([sys.executable, str(ROOT / 'scripts/build_agent.py'), '--output', str(bundle)], check=True, capture_output=True)
+        with zipfile.ZipFile(bundle) as z:
+            assert '__main__.py' in z.namelist()
+            assert 'claude_history_audit/sync.py' in z.namelist()
+            assert not any('device.json' in n or '__pycache__' in n for n in z.namelist())
+        help_result = subprocess.run([sys.executable, str(bundle), '--help'], check=True, capture_output=True, cwd=str(folder), env=env)
+        assert b'install' in help_result.stdout and b'sync' in help_result.stdout
+        subprocess.run([sys.executable, str(bundle), 'status'], check=True, capture_output=True, cwd=str(folder), env=env)
+        bad_config = folder / 'device.json'
+        bad_config.write_text('{}')
+        failed = subprocess.run([sys.executable, str(bundle), 'sync', '--config', str(bad_config)], capture_output=True, cwd=str(folder), env=env)
+        assert failed.returncode == 2
+    print("PASS: portable skill install, reports, privacy, read-only input, registry, standalone zip agent and failure exit code")
+    subprocess.run([sys.executable,str(ROOT/'scripts/smoke_sync.py')],check=True)
 
 
 if __name__ == "__main__":

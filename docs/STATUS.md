@@ -1,25 +1,25 @@
 # Status
 
-2026-10-05: 登録した別PC・サーバーからの自動取得を追加。最終検証・レビュー状態は末尾のHarness欄を参照。
+2026-10-05: Web画面へ数値のみを同期する端末ツールを追加。最終検証・独立レビューは末尾のHarness欄を参照。
 
-- SSH先/共有フォルダの登録、監査時の自動収集、既存集計との統合を実装。
-- Pythonの読み取り専用収集プログラムをSSH経由で実行。転送・時間上限、アーカイブ検証、私的なスナップショット保存に対応。
-- 取得失敗は通常停止。一部集計は明示指定と終了コード3、取得範囲はHTML/Markdown/JSONに表示する。
-- 全38件の回帰テストと独立スキル導入E2Eを実行済み。追加の事前検証ケースを含めた最終件数はHarnessの証拠に記録する。
-- SSH送信プログラムと受信処理は合成データ・実Pythonプロセスで結合検証。実際の別端末へのSSH接続は未実施（接続先未提供、このMacにSSHのHost設定なし）。
-- スキルを更新し、EnterpriseのCompliance APIによる公式取得とPro/Maxの各環境からの取得を区別して説明。公式APIコネクターは未実装。
-- 元履歴・監査結果・接続先はGitに保存しない。
+- ローカル集計・SSH/共有フォルダ取得は既存機能として維持。
+- cloud sync/status、独立Python zipアプリ、HTTPS限定転送、許可リスト、安定HMAC ID、分割同期、成功確認に対応。
+- Windowsは現在のユーザーがログイン中に15分ごとのタスクを登録。パスは引用し、接続鍵をコマンドラインに含めない。Mac/Linux/WSLは手動sync。
+- 全50件のunittest、独立スキル導入・CLIレポート・配布zipアプリのスモークテスト成功。配布pyzを独立プロセスでinstallし、実HTTPSで501件を2分割送信、認証ヘッダー、本文除外、受信完了と状態保存まで検証（合成履歴・一時CAを使用、TLS検証は有効）。Windowsタスク登録はモックでコマンドと失敗処理を検証。
+- 実Windows端末は未接続。本人のログイン、実PCへのインストールと定期実行は未検証。Web側の複数利用者・端末の結合検証は別案件で実施。
+- 元履歴・監査結果・接続設定・接続鍵はGitへ保存しない。
 - GitHub: https://github.com/fuji-kai-keiba/claude-history-audit （private）
+- Web: https://github.com/fuji-kai-keiba/claude-history-audit-web （別案件、非公開サイト）
 
 ## 起動
 
-`python3 scripts/audit.py sources add-ssh work user@server`
+ローカル監査: `python3 scripts/audit.py --days 30 --open`
 
-`python3 scripts/audit.py --days 30 --open`
-
-取得先未登録の場合はこの端末の保存履歴のみ。登録済みなら監査のたびに収集する。バックグラウンドの定期実行は設定しない。
+SSH登録: `python3 scripts/audit.py sources add-ssh work user@server`
 
 スキル: `python3 scripts/install_skill.py` → Claude Codeで `/claude-history-audit`
+
+Web同期: Webから各PC専用ZIPを取得し、Windowsは `install-windows.cmd`。その他は `python3 audit-agent.pyz install --config device.json`、更新は `sync`。
 
 ## 検証
 
@@ -27,20 +27,18 @@
 
 `python3 scripts/smoke_test.py`
 
-## 既知の制約
+## 制約・次の作業
 
-未登録端末、削除済み履歴、公式アカウントAPI、請求との自動突合は対象外。相手側Python3と非対話SSH接続が必要。ホスト鍵は通常のSSHで確認済みのものを使う。元履歴コピーは自動削除しない。
+未登録端末、削除済み履歴、公式組織APIコネクター、請求との自動突合は対象外。Webに受信済みの使用量は端末側の履歴削除後も保持。現版は同期ごとに端末の保存履歴全体を処理する。大規模利用での負荷測定・差分同期は今後の拡張。
 
-## 次の作業
-
-実際に利用している別PC・サーバーのSSH接続先または共有履歴パスを登録し、実接続で取得範囲を確認する。Claudeモデルによるスラッシュコマンド呼び出しは未実施。
+本人が各PCで一度設定し、実Windowsで最終同期と定期更新を確認する。WSLとWindowsの履歴保存先は別。SSHの実接続とClaudeモデルによるスキル呼び出しも未実施。
 
 <!-- harness:start -->
 ## Harness
 
-- Task: bb64873d3bc9 / 複数端末の履歴を自動取得して監査
+- Task: 9e1a6e053c5a / Web監査用の数値同期とWindows自動実行
 - 状態: done
 - 次の作業: 完了。変更が生じた場合は再検証する
 - 試行: 0/3
-- 記録: .harness/bb64873d3bc9/task.json
+- 記録: .harness/9e1a6e053c5a/task.json
 <!-- harness:end -->

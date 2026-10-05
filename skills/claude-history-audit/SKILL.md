@@ -25,4 +25,8 @@ python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" --days 30
 
 集計レポートは本文・パス・ホスト名を含めず、根拠IDで参照する。local-map.json、sources.json、collections/以下は私的情報。ユーザーが登録したSSH先からこの監査端末への取得以外に、元履歴・出力を外部送信したりGitへ追加したりしない。単価指定は `--price-book` で明示された表を使う場合だけ。
 
+Web同期を依頼された場合は、監査Web画面から各PC専用の設定ZIPを取得し、Windowsでは展開後 `install-windows.cmd` を実行する方法を案内する。既に設定済みの端末は `scripts/run.py cloud sync` で手動更新、`cloud status` で最終成功を確認できる。任意のURLへ送信せず、導入済みdevice.jsonに記録されたHTTPS同期先だけを利用する。この同期は明示的な依頼・設定がある場合に限り、許可リストの数値と仮名IDのみを送る。元履歴、通常レポート、接続鍵、device.jsonの内容を外部へ送ったりチャットへ貼ったりしない。通常監査の実行だけでWeb同期を始めない。
+
+WindowsはPython 3.9以降が必要。初回導入後はログイン中に15分ごとに同期する。Mac/Linux/WSLは同梱pyzのsyncコマンドで手動更新する。未登録PC、欠損履歴、初回待ち、更新待ちを含めて全PC取得済みと呼ばない。各PCで最初の設定が必要であり、Claudeへのログインだけでは全端末の保存履歴を取得できない。
+
 このツールは公式アカウントAPIには接続しない。Pro/Maxの個人アカウントでは組織向けAPIを利用できない。Enterpriseは管理者が有効にしたCompliance APIで対象セッションの履歴を取得できるため、「すべて端末にしかない」と説明しない。契約の費用や利用集計は別のAnalytics API/管理画面と照合する。
