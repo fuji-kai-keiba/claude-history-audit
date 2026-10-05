@@ -1,0 +1,15 @@
+.harness/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.DS_Store
+reports/
+private/
+*.jsonl
+local-map.json
+report.json
+report.html
+summary.md

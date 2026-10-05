@@ -1,0 +1,10 @@
+{
+  "as_of": "2026-10-05",
+  "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+  "unit": "USD per million tokens; standard API list price, not an invoice",
+  "models": {
+    "claude-sonnet-4-6": {"input": 3, "output": 15, "cache_read": 0.3, "cache_write_5m": 3.75, "cache_write_1h": 6},
+    "claude-opus-4-8": {"input": 5, "output": 25, "cache_read": 0.5, "cache_write_5m": 6.25, "cache_write_1h": 10},
+    "claude-haiku-4-5-20251001": {"input": 1, "output": 5, "cache_read": 0.1, "cache_write_5m": 1.25, "cache_write_1h": 2}
+  }
+}

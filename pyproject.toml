@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-history-audit"
+version = "0.1.0"
+description = "Offline, evidence-based auditing of retained Claude Code transcripts"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+claude-history-audit = "claude_history_audit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["app"]
