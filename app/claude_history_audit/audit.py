@@ -405,7 +405,7 @@ def audit(sources, since=None, until=None, prices=None, now=None):
             "usd_range": [sum(x[i] for x in known) for i in (0, 1)] if known else None},
         "models": model_rows, "sessions": session_rows, "findings": findings, "requests": request_rows,
         "limitations": [
-            "保存済みの対象ログだけを分析。他端末・Web・Cowork・削除済み履歴・固定席代を自動で網羅しません。",
+            "取得・指定できた保存ログだけを分析。未登録端末・Web・Cowork・削除済み履歴・固定席代を自動で網羅しません。",
             "内部JSONL形式はバージョンで変化します。欠損・不明項目はカバレッジに表示します。",
             "同じmessage.id（なければrequestId）の使用量は各カウンターの最大値で集約。識別子がない記録は重複排除を保証しません。",
             "記録時刻のない行は期間集計から除外。サブエージェントの記録は保存範囲にある場合だけ含めます。",

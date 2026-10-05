@@ -1,6 +1,5 @@
 import argparse
 import json
-import os
 import sys
 import webbrowser
 from datetime import datetime, timedelta, timezone
@@ -9,6 +8,8 @@ from pathlib import Path
 from . import __version__
 from .audit import audit, iso, load_prices
 from .report import cost_text, write_reports
+from .collection import (collect, collection_notice, default_config, local_source,
+                         read_config, sources_main, state_home)
 
 
 def calendar_date(text):
@@ -19,7 +20,10 @@ def calendar_date(text):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Claude Codeの保存済み履歴をローカルで監査。通信・履歴変更・LLM呼び出しなし。")
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "sources":
+        return sources_main(argv[1:])
+    parser = argparse.ArgumentParser(description="Claude Code履歴を監査。登録済みSSH先は自動取得。履歴変更・LLM呼び出しなし。")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--source", action="append", type=Path, help="JSONLファイルまたはフォルダ。複数指定可。既定: CLAUDE_CONFIG_DIR/projects または ~/.claude/projects")
     window = parser.add_mutually_exclusive_group()
@@ -30,30 +34,58 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, help="新しい出力フォルダ。既定: ~/.claude-history-audit/reports/日時")
     parser.add_argument("--price-book", type=Path, help="明示指定したAPI単価表で参考額を計算。請求額ではありません")
     parser.add_argument("--open", action="store_true", help="作成後、ローカルHTMLをブラウザで開く")
+    parser.add_argument("--sources-config", type=Path, help="取得先設定。省略時は ~/.claude-history-audit/sources.json があれば使用")
+    parser.add_argument("--local-only", action="store_true", help="登録先に接続せず、この環境の既定の履歴だけを監査")
+    parser.add_argument("--allow-partial", action="store_true", help="取得失敗時も取得できた範囲でレポート作成。終了コード3で一部取得を通知")
     args = parser.parse_args(argv)
     if args.days is not None and args.days < 1:
         parser.error("--days は1以上にしてください。")
+    if (args.source and (args.sources_config or args.local_only)) or (args.local_only and args.sources_config):
+        parser.error("--source、--sources-config、--local-only は併用できません。")
     now = datetime.now(timezone.utc)
     until = args.until + timedelta(days=1) if args.until else now
     since = None if args.all else args.since or until - timedelta(days=args.days if args.days is not None else 30)
     if since and since >= until:
         parser.error("開始日は終了日より前にしてください。")
-    config = Path(os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))).expanduser()
-    sources = args.source or [config / "projects"]
+    sources = args.source or [local_source()]
     output = args.output or Path.home() / ".claude-history-audit" / "reports" / now.strftime("%Y%m%dT%H%M%S%fZ")
+    status, private = {"mode": "paths"}, {}
     try:
         dest = output.expanduser().resolve()
+        if dest.exists() or dest.is_symlink():
+            raise ValueError("出力先は新しいフォルダを指定してください。")
+        prices = load_prices(args.price_book)
+        registry_path = (args.sources_config or default_config()).expanduser()
+        if not args.source and not args.local_only and (args.sources_config or registry_path.exists()):
+            config = read_config(registry_path)
+            snapshot = state_home() / "collections" / now.strftime("%Y%m%dT%H%M%S%fZ")
+            local_paths = ([local_source()] if config.get("include_local", True) else []) + [Path(s["path"]).expanduser() for s in config["sources"] if s["kind"] == "path"]
+            for path in local_paths:
+                root = path.resolve()
+                for target in (snapshot.resolve(), output.expanduser().resolve()):
+                    if target == root or root in target.parents:
+                        raise ValueError("取得・出力先を履歴保存先の中には置けません。取得先のpathを確認してください。")
+            print("登録済みの取得先を確認・収集しています…", flush=True)
+            sources, status, private = collect(config, snapshot)
+            print(collection_notice(status))
+            print("取得記録（私的情報を含む）: " + str(snapshot / "collection.json"))
+            if status["failed"] and not args.allow_partial:
+                raise ValueError("取得が完了していない接続先があるため集計を中止しました。取得記録を確認してください。一部だけの集計は --allow-partial で明示できます。")
+            if not sources:
+                raise ValueError("登録した取得先に監査できるJSONL履歴がありません。")
         for source in sources:
             src = source.expanduser().resolve()
             if dest == src or src in dest.parents:
                 raise ValueError("履歴の保存先の中へレポートは書き込みません。別の --output を指定してください。")
-        prices = load_prices(args.price_book)
         report, local_map = audit(sources, since=since, until=until, prices=prices, now=now)
+        report["collection"] = status
+        local_map["collection_sources"] = private
         destination = write_reports(output, report, local_map)
     except (OSError, ValueError, TypeError, OverflowError) as error:
         print("監査できません: " + str(error), file=sys.stderr)
         return 2
     c = report["coverage"]
+    print(collection_notice(status))
     print(f"監査完了: {c['sessions']}セッション / {c['unique_requests']}応答 / 改善候補{len(report['findings'])}件")
     print("参考額: " + cost_text(report) + "（請求額ではありません）")
     print("HTML: " + str(destination / "report.html"))
@@ -62,7 +94,7 @@ def main(argv=None):
     print("local-map.json は実パスを含む私的ファイルです。")
     if args.open:
         webbrowser.open((destination / "report.html").as_uri())
-    return 0
+    return 3 if status.get("failed") else 0
 
 
 if __name__ == "__main__":

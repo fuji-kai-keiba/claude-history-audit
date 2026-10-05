@@ -2,6 +2,7 @@
 """Synthetic end-to-end audit and portable skill installation, no real history."""
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -35,7 +36,20 @@ def main():
         assert hashlib.sha256(source.read_bytes()).hexdigest() == before
         result = subprocess.run([sys.executable, str(ROOT / "scripts" / "install_skill.py"), "--destination", str(folder / "skill")], capture_output=True)
         assert result.returncode != 0
-    print("PASS: portable skill install, CLI, four reports, cost coverage, privacy, read-only input, overwrite protection")
+        # A portable installed skill must discover its persistent source registry.
+        home = folder / "home"
+        home.mkdir()
+        env = dict(os.environ, HOME=str(home), USERPROFILE=str(home))
+        mounted = folder / "mounted"
+        mounted.mkdir()
+        (mounted / "copy.jsonl").write_bytes(source.read_bytes())
+        for command in (["sources", "local", "off"], ["sources", "add-path", "work", str(mounted)],
+                        ["--all", "--output", str(folder / "collected")]):
+            subprocess.run([sys.executable, str(runner)] + command, check=True, capture_output=True, env=env, cwd=str(folder))
+        combined = json.loads((folder / "collected/report.json").read_text())
+        assert combined["collection"]["successful"] == 1
+        assert combined["coverage"]["unique_requests"] == 1
+    print("PASS: portable skill install, CLI, four reports, cost coverage, privacy, read-only input, overwrite protection, automatic source registry")
 
 
 if __name__ == "__main__":
