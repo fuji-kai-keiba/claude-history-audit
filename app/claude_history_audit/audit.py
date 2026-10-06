@@ -173,7 +173,7 @@ def estimate(request, prices):
     return [(base + known + unknown * low) / 1e6, (base + known + unknown * high) / 1e6]
 
 
-def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False):
+def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False, zone=None):
     now = now or datetime.now(UTC)
     files, skipped, source_errors = discover(sources)
     if not files:
@@ -332,6 +332,7 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                         errors.append(evidence)
     if not stats["records_in_window"]:
         raise ValueError("指定期間に時刻付きのセッション記録がありません。--all または --source を確認してください。")
+    from .periods import Zone, all_periods
     request_rows = sorted(requests.values(), key=lambda r: (parse_time(r["timestamp"]), r["id"]))
     for request in request_rows:
         request["cost_usd_range"] = estimate(request, prices)
@@ -423,6 +424,7 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", prices["as_of"]) else None,
             "enabled": prices is not None, "priced_requests": len(known), "unpriced_requests": len(request_rows) - len(known),
             "usd_range": [sum(x[i] for x in known) for i in (0, 1)] if known else None},
+        "periods": all_periods(request_rows, zone or Zone()),
         "models": model_rows, "sessions": session_rows, "findings": findings, "requests": request_rows,
         "limitations": [
             "取得・指定できた保存ログだけを分析。未登録端末・Web・Cowork・削除済み履歴・固定席代を自動で網羅しません。",

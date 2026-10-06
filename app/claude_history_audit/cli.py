@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import __version__
 from .audit import audit, iso, load_prices
+from .periods import UNITS, Zone, render_table
 from .report import cost_text, write_reports
 from .collection import (collect, collection_notice, default_config, local_source,
                          read_config, sources_main, state_home)
@@ -29,8 +30,63 @@ def instant(text):
         raise argparse.ArgumentTypeError("時刻は 2026-09-06T00:00:00+09:00 のようにUTCオフセット付きで指定してください。")
 
 
+def usage_main(argv):
+    """Terminal tables like ccusage daily/weekly/monthly. Reads local history only; writes nothing."""
+    parser = argparse.ArgumentParser(prog="audit.py usage",
+        description="日別・週別・月別の利用量を表示。この環境の履歴（または --source）だけを読み、ファイルは書きません。")
+    parser.add_argument("unit", nargs="?", choices=UNITS, default="daily", help="集計単位（既定 daily）")
+    parser.add_argument("--source", action="append", type=Path, help="JSONLファイルまたはフォルダ。複数指定可")
+    window = parser.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, help="直近N日（既定30）")
+    window.add_argument("--since", help="開始日 YYYY-MM-DD（--timezone の暦で、その日を含む）")
+    window.add_argument("--all", action="store_true", help="残っている全期間")
+    parser.add_argument("--until", help="終了日 YYYY-MM-DD（--timezone の暦で、その日を含む）")
+    parser.add_argument("--timezone", default="local", help="日付の区切り。local（既定・OSの時刻設定）、UTC、+09:00、Asia/Tokyo など")
+    prices_group = parser.add_mutually_exclusive_group()
+    prices_group.add_argument("--price-book", type=Path, help="明示指定したAPI単価表で参考額を表示。請求額ではありません")
+    prices_group.add_argument("--reference-prices", action="store_true", help="同梱の標準API単価表で参考額を表示。請求額ではありません")
+    parser.add_argument("--breakdown", action="store_true", help="期間ごとにモデル別の行を表示")
+    parser.add_argument("--json", action="store_true", help="表の代わりにJSONを出力")
+    args = parser.parse_args(argv)
+    if args.days is not None and args.days < 1:
+        parser.error("--days は1以上にしてください。")
+    try:
+        zone = Zone(args.timezone)
+        def day(text):
+            try:
+                return datetime.strptime(text, "%Y-%m-%d").date()
+            except ValueError:
+                raise ValueError("日付は YYYY-MM-DD で指定してください: " + text)
+        now = datetime.now(timezone.utc)
+        until = zone.midnight(day(args.until) + timedelta(days=1)) if args.until else now
+        if args.all:
+            since = None
+        elif args.since:
+            since = zone.midnight(day(args.since))
+        else:
+            first_day = zone.convert(until - timedelta(seconds=1)).date() - timedelta(days=(args.days or 30) - 1)
+            since = zone.midnight(first_day)
+        if since and since >= until:
+            raise ValueError("開始日は終了日より前にしてください。")
+        prices = load_prices(Path(__file__).with_name("reference_prices.json") if args.reference_prices else args.price_book)
+        report, _ = audit(args.source or [local_source()], since=since, until=until, prices=prices, now=now, zone=zone)
+    except (OSError, ValueError, TypeError, OverflowError) as error:
+        print("集計できません: " + str(error), file=sys.stderr)
+        return 2
+    rows = report["periods"][args.unit]
+    if args.json:
+        print(json.dumps({"unit": args.unit, "timezone": report["periods"]["timezone"], "window": report["window"],
+                          "cost_basis": report["cost"]["basis"], "rows": rows}, ensure_ascii=False, indent=2))
+    else:
+        print(render_table(rows, args.unit, report["periods"]["timezone"], args.breakdown))
+        print("参考額はAPI単価による換算で、請求額ではありません。" if prices else "参考額は --reference-prices か --price-book を指定すると表示します。")
+    return 0
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "usage":
+        return usage_main(argv[1:])
     if argv and argv[0] == "sources":
         return sources_main(argv[1:])
     if argv and argv[0] == "cloud":
@@ -53,6 +109,7 @@ def main(argv=None):
     price.add_argument("--reference-prices", action="store_true", help="同梱の標準API参考単価表を使用。実請求ではありません")
     parser.add_argument("--deep", action="store_true", help="文脈推移・親子実行・再試行・ツール結果量・圧縮前後を追加監査")
     parser.add_argument("--open", action="store_true", help="作成後、ローカルHTMLをブラウザで開く")
+    parser.add_argument("--timezone", default="local", help="日別・週別・月別の区切り。local（既定）、UTC、+09:00 など。期間指定はUTCのまま")
     parser.add_argument("--sources-config", type=Path, help="取得先設定。省略時は ~/.claude-history-audit/sources.json があれば使用")
     parser.add_argument("--local-only", action="store_true", help="登録先に接続せず、この環境の既定の履歴だけを監査")
     parser.add_argument("--allow-partial", action="store_true", help="取得失敗時も取得できた範囲でレポート作成。終了コード3で一部取得を通知")
@@ -74,6 +131,7 @@ def main(argv=None):
         if dest.exists() or dest.is_symlink():
             raise ValueError("出力先は新しいフォルダを指定してください。")
         prices = load_prices(Path(__file__).with_name("reference_prices.json") if args.reference_prices else args.price_book)
+        zone = Zone(args.timezone)
         registry_path = (args.sources_config or default_config()).expanduser()
         if not args.source and not args.local_only and (args.sources_config or registry_path.exists()):
             config = read_config(registry_path)
@@ -96,7 +154,7 @@ def main(argv=None):
             src = source.expanduser().resolve()
             if dest == src or src in dest.parents:
                 raise ValueError("履歴の保存先の中へレポートは書き込みません。別の --output を指定してください。")
-        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep)
+        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep, zone=zone)
         report["collection"] = status
         local_map["collection_sources"] = private
         destination = write_reports(output, report, local_map)

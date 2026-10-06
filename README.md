@@ -50,6 +50,22 @@ python3 scripts/audit.py --deep --reference-prices --since-at 2026-09-06T00:00:0
 
 `--since-at` は開始を含み、`--until-at` は終了を含みません。時差を必ず指定します。日付版の `--until`（指定日を含む）とは意味が違います。重複除外やセッション定義も比較してください。
 
+## 日別・週別・月別の利用量をすぐ見る
+
+レポートを作らず、ターミナルに表で出します。この環境の保存履歴（または `--source`）だけを読み、ファイルは書きません。登録済みSSH先には接続しません。
+
+```bash
+python3 scripts/audit.py usage daily                    # 直近30日・日別
+python3 scripts/audit.py usage weekly --since 2026-09-01
+python3 scripts/audit.py usage monthly --all --reference-prices
+python3 scripts/audit.py usage daily --days 7 --breakdown  # 期間ごとにモデル別の行
+python3 scripts/audit.py usage daily --json               # 機械処理用
+```
+
+日付の区切りは既定でOSの時刻設定（`local`）。`--timezone UTC`、`+09:00`、`Asia/Tokyo` も指定できます（地域名はOSのタイムゾーンデータか tzdata が必要。時差の数値指定は追加パッケージ不要）。`usage` の `--since`/`--until` はこの暦の日付です。週は月曜始まり。参考額は `--reference-prices`（同梱表）か `--price-book` を指定したときだけ表示し、単価のないモデルは「未換算」として件数を出します。
+
+通常の監査レポート（report.json・summary.md・HTML）にも同じ期間別の表を出します。区切りは `--timezone`（既定 local）ですが、監査の `--since`/`--until` は従来どおりUTCです。
+
 ## 別のPC・サーバーから自動取得
 
 Web画面への自動同期を使いたい場合は、後述の「どのPCからもWebで確認する」を使ってください。この節は監査実行時に別端末から取得する方式です。
@@ -167,7 +183,7 @@ Claude Codeで:
 python3 scripts/audit.py --days 30 --price-book docs/prices.example.json
 ```
 
-同梱表と例の単価表は2026-10-06確認の一部モデル（Opus 5を含む）の標準API単価です。[公式料金表](https://platform.claude.com/docs/en/about-claude/pricing)の確認日時点の参考額で、過去の料金改定を再現するものではありません。使用前に公式料金・契約と照合してください。モデルIDは完全一致で扱い、不明モデルやfastモードなどは推測せず未換算にします。キャッシュTTLの内訳がない場合は5分/1時間の単価による範囲を出します。
+同梱表と例の単価表は2026-10-06確認の現行モデル（Fable 5.1、Opus 5.5/5/4.8/4.7/4.6、Sonnet 5.5/5/4.6、Haiku 4.5）の標準API単価です。キャッシュ読み出しは入力の0.1倍（Fable 5.1は0.025倍、Opus 5.5は0.05倍）、書き込みは5分1.25倍・1時間2倍。[公式料金表](https://platform.claude.com/docs/en/about-claude/pricing)の確認日時点の参考額で、過去の料金改定を再現するものではありません。使用前に公式料金・契約と照合してください。モデルIDは完全一致で扱い、不明モデルやfastモードなどは推測せず未換算にします。キャッシュTTLの内訳がない場合は5分/1時間の単価による範囲を出します。
 
 **参考額は請求額ではありません。** 固定席代、契約割引、税、外部ツール費用、未登録端末・Web・Coworkの利用を自動で含めません。請求CSVの取り込み・全社請求との自動突合は現版の対象外です。
 

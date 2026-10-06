@@ -5,6 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 from .collection import collection_notice
+from .periods import UNIT_LABELS, money
 
 
 def fmt(value):
@@ -16,6 +17,27 @@ def cost_text(report):
     if value is None:
         return "単価未指定 / 換算対象なし"
     return f"${value[0]:.4f}" if abs(value[1] - value[0]) < 1e-8 else f"${value[0]:.4f}–${value[1]:.4f}"
+
+
+PERIOD_LIMIT = 62
+
+
+def period_markdown(report):
+    periods = report.get("periods")
+    if not periods:
+        return []
+    lines = ["## 期間別の利用", "", f"区切り: {periods['timezone']}。参考額は単価表を指定したときだけ表示します。", ""]
+    for unit in ("monthly", "weekly", "daily"):
+        rows = periods[unit][-PERIOD_LIMIT:]
+        lines += [f"### {UNIT_LABELS[unit]}", "", "| 期間 | 応答 | 通常入力 | キャッシュ書込 | キャッシュ読出 | 出力 | 参考額 |", "|---|---:|---:|---:|---:|---:|---:|"]
+        for r in rows:
+            t = r["tokens"]
+            lines.append(f"| {r['period']} | {fmt(r['requests'])} | {fmt(t['input_tokens'])} | {fmt(t['cache_creation_input_tokens'])} | "
+                         f"{fmt(t['cache_read_input_tokens'])} | {fmt(t['output_tokens'])} | {money(r['cost_usd_range'], r['priced_requests'], r['requests'])} |")
+        if len(periods[unit]) > PERIOD_LIMIT:
+            lines += ["", f"直近{PERIOD_LIMIT}件のみ表示。全件は report.json の periods にあります。"]
+        lines.append("")
+    return lines
 
 
 def markdown(report):
@@ -39,8 +61,9 @@ def markdown(report):
         f"| ツール呼び出し / 失敗 | {m['tool_calls']} / {m['tool_errors']} |", "",
         "## API単価による参考額", "", cost_text(report), "", report["cost"]["basis"],
         "単価表の基準日: " + str(report["cost"].get("price_book_as_of") or "未指定") + "。過去の請求単価の再現ではありません。",
-        f"換算済み {report['cost']['priced_requests']} / 未換算 {report['cost']['unpriced_requests']} 応答。未換算分は0円ではありません。", "",
-        "## 改善候補", ""]
+        f"換算済み {report['cost']['priced_requests']} / 未換算 {report['cost']['unpriced_requests']} 応答。未換算分は0円ではありません。", ""]
+    lines += period_markdown(report)
+    lines += ["## 改善候補", ""]
     for f in report["findings"]:
         lines.extend(["### " + f["title"], "", "観測: " + f["observation"], "", "解釈: " + f["interpretation"],
                       "", "次の検証: " + f["action"], ""])
@@ -80,6 +103,16 @@ def render_html(report):
         findings = '<p class="muted">検出条件に該当する候補はありません。無駄がないことを保証するものではありません。</p>'
     model_rows = "".join(f'<tr><td>{esc(r["model"])}</td><td>{fmt(r["requests"])}</td><td>{fmt(sum(r["tokens"].values()))}</td><td>{fmt(r["tokens"]["output_tokens"])}</td></tr>' for r in report["models"])
     session_rows = "".join(f'<tr><td><code>{esc(s["id"])}</code><small>{esc(s["first"])}</small></td><td>{esc(s["workload_hint"])}</td><td>{s["requests"]}</td><td>{fmt(s["tokens"])}</td><td>{s["repeated_reads"]}</td><td>{s["tool_errors"]}</td></tr>' for s in report["sessions"][:200])
+    periods = report.get("periods")
+    period_panel = ""
+    if periods:
+        period_panel = '<section class="panel"><h2>期間別の利用</h2><p class="meta muted">区切り: ' + esc(periods["timezone"]) + '。参考額は単価表を指定したときだけ表示します。</p>'
+        for unit, opened in (("monthly", " open"), ("weekly", ""), ("daily", " open")):
+            rows = "".join('<tr><td>' + esc(r["period"]) + '</td>' + "".join('<td>' + fmt(v) + '</td>' for v in [r["requests"], r["tokens"]["input_tokens"], r["tokens"]["cache_creation_input_tokens"], r["tokens"]["cache_read_input_tokens"], r["tokens"]["output_tokens"]])
+                + '<td>' + esc(money(r["cost_usd_range"], r["priced_requests"], r["requests"])) + '</td></tr>' for r in reversed(periods[unit][-PERIOD_LIMIT:]))
+            period_panel += ('<details' + opened + '><summary>' + esc(UNIT_LABELS[unit]) + 'ごと</summary><div class="scroll"><table><thead><tr><th>期間</th><th>応答</th><th>通常入力</th><th>キャッシュ書込</th><th>キャッシュ読出</th><th>出力</th><th>参考額</th></tr></thead><tbody>'
+                + rows + '</tbody></table></div></details>')
+        period_panel += '</section>'
     coverage_rows = "".join(f'<tr><td>{esc(k)}</td><td>{esc(v)}</td></tr>' for k, v in c.items())
     limitations = "".join('<li>' + esc(line) + '</li>' for line in report["limitations"])
     collection = report.get("collection", {"mode": "paths"})
@@ -97,7 +130,7 @@ def render_html(report):
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Claude Code 履歴監査</title><style>
 :root{color-scheme:light;--ink:#172d31;--muted:#597073;--line:#d9e2de;--paper:#f4f6f2;--accent:#297969}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.8 -apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif}main{max-width:1200px;margin:auto;padding:46px 32px 70px}header{border-bottom:1px solid var(--line);padding-bottom:27px}.eyebrow{letter-spacing:.16em;font-size:12px;color:var(--accent);font-weight:700}h1{font-size:34px;letter-spacing:-.04em;line-height:1.4;margin:12px 0}h2{font-size:20px;margin:0 0 17px}h3{font-size:17px;margin:0}.muted,small{color:var(--muted)}header p{margin:8px 0}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:26px 0}.stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:21px}.stat span{color:var(--muted);font-size:13px}.stat strong{display:block;font-size:27px;line-height:1.5;margin:9px 0;overflow-wrap:anywhere}.stat small{font-size:11px;display:block}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:25px;margin-bottom:20px}.bar-row{display:grid;grid-template-columns:120px 1fr 105px;gap:12px;align-items:center;margin:14px 0;font-size:13px}.bar-row b{text-align:right;font-variant-numeric:tabular-nums}.track{height:13px;border-radius:3px;background:#edf1ed;overflow:hidden}.track i{height:100%;display:block}.notice{background:#edf4f0;padding:17px;border-left:3px solid var(--accent);font-size:13px}.finding{border-top:1px solid var(--line);padding:22px 0}.finding:first-of-type{border-top:0;padding-top:0}.finding:last-child{padding-bottom:0}.finding-head{display:flex;gap:12px;align-items:center}.tag{font-size:11px;color:#775420;background:#f7eedc;border-radius:4px;padding:2px 8px;white-space:nowrap}.finding p{margin:8px 0;font-size:14px}.finding p b{margin-right:8px}details{font-size:12px;color:var(--muted)}summary{cursor:pointer}code{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;overflow-wrap:anywhere}.scroll{overflow-x:auto}.scroll table{min-width:640px}table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}th{color:var(--muted);font-weight:500;font-size:12px}td,th{padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}td small{display:block;font-size:11px}input{font:inherit;padding:9px 13px;border:1px solid var(--line);border-radius:7px;max-width:100%;width:340px;margin-bottom:15px}ul{padding-left:21px;font-size:13px}footer{font-size:12px;color:var(--muted)}.meta{font-size:12px}.metrics{display:flex;gap:25px;flex-wrap:wrap}.metrics strong{font-size:25px;display:block}.metrics span{font-size:12px;color:var(--muted)}@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}@media(max-width:550px){main{padding:24px 15px}.cards{gap:8px}.stat{padding:14px}.stat strong{font-size:22px}h1{font-size:27px}.panel{padding:18px}.bar-row{grid-template-columns:90px 1fr 80px;gap:7px;font-size:11px}}@media print{body{background:#fff}main{max-width:none;padding:0}.panel,.stat{break-inside:avoid}.cards{grid-template-columns:repeat(4,1fr)}input{display:none}}
-</style></head><body><main><header><div class="eyebrow">CLAUDE HISTORY AUDIT · LOCAL REPORT</div><h1>履歴から、次の改善を見つける。</h1><p>保存済みの作業を集計した監査レポート。観測と改善仮説を分けて確認します。</p><p class="meta">''' + esc(c["first_record"]) + ' → ' + esc(c["last_record"]) + '（UTC） · 作成 ' + esc(report["generated_at"]) + '</p></header>' + scope + '<div class="cards">' + cards + '''</div><div class="grid"><section class="panel"><h2>トークンの内訳</h2>''' + bars + '''<p class="muted meta">読み出しは低単価のキャッシュを含みます。トークン数と費用は比例しません。</p></section><section class="panel"><h2>処理とカバレッジ</h2><div class="metrics">''' + ''.join(f'<div><strong>{fmt(v)}</strong><span>{esc(k)}</span></div>' for k, v in [("対象ファイル", c["files_found"]), ("ツール実行", m["tool_calls"]), ("明示的な失敗", m["tool_errors"])]) + '</div><p class="meta">使用量が揃う応答 ' + f'{c["complete_usage_requests"]} / {c["unique_requests"]}' + ' · 重複レコード ' + str(c.get("duplicate_usage_records", 0)) + '</p><div class="notice">' + esc(report["cost"]["basis"]) + f'<br>換算済み {report["cost"]["priced_requests"]} / 未換算 {report["cost"]["unpriced_requests"]}。未換算分は0円ではありません。' + '</div></section></div><section class="panel"><h2>根拠付きの改善候補</h2>' + findings + '</section>' + deep_html(report.get("deep")) + '<section class="panel"><h2>モデル別の利用</h2><div class="scroll"><table><thead><tr><th>モデル</th><th>応答</th><th>総トークン</th><th>出力</th></tr></thead><tbody>' + model_rows + '</tbody></table></div></section><section class="panel"><h2>セッション別の利用</h2><p class="meta muted">総トークン順、最大200件。作業分類はキーワードによる参考値。全件は report.json に保存しています。</p><input id="filter" aria-label="セッションを絞り込む" placeholder="分類・セッションIDで絞り込み"><div class="scroll"><table id="sessions"><thead><tr><th>セッション / 開始UTC</th><th>作業の参考分類</th><th>応答</th><th>総トークン</th><th>再読込</th><th>失敗</th></tr></thead><tbody>' + session_rows + '</tbody></table></div></section><section class="panel"><h2>この監査で判断できないこと</h2><ul>' + limitations + '</ul><details><summary>欠損・除外を含む集計の詳細</summary><div class="scroll"><table>' + coverage_rows + '</table></div></details></section><footer>このレポート画面は通信しません。会話本文とパスはこの画面に含めません。根拠の実ファイルはローカルの local-map.json で確認できます。</footer></main><script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#sessions tbody tr").forEach(function(row){row.hidden=!row.textContent.toLowerCase().includes(q);});});</script></body></html>'
+</style></head><body><main><header><div class="eyebrow">CLAUDE HISTORY AUDIT · LOCAL REPORT</div><h1>履歴から、次の改善を見つける。</h1><p>保存済みの作業を集計した監査レポート。観測と改善仮説を分けて確認します。</p><p class="meta">''' + esc(c["first_record"]) + ' → ' + esc(c["last_record"]) + '（UTC） · 作成 ' + esc(report["generated_at"]) + '</p></header>' + scope + '<div class="cards">' + cards + '''</div><div class="grid"><section class="panel"><h2>トークンの内訳</h2>''' + bars + '''<p class="muted meta">読み出しは低単価のキャッシュを含みます。トークン数と費用は比例しません。</p></section><section class="panel"><h2>処理とカバレッジ</h2><div class="metrics">''' + ''.join(f'<div><strong>{fmt(v)}</strong><span>{esc(k)}</span></div>' for k, v in [("対象ファイル", c["files_found"]), ("ツール実行", m["tool_calls"]), ("明示的な失敗", m["tool_errors"])]) + '</div><p class="meta">使用量が揃う応答 ' + f'{c["complete_usage_requests"]} / {c["unique_requests"]}' + ' · 重複レコード ' + str(c.get("duplicate_usage_records", 0)) + '</p><div class="notice">' + esc(report["cost"]["basis"]) + f'<br>換算済み {report["cost"]["priced_requests"]} / 未換算 {report["cost"]["unpriced_requests"]}。未換算分は0円ではありません。' + '</div></section></div><section class="panel"><h2>根拠付きの改善候補</h2>' + findings + '</section>' + deep_html(report.get("deep")) + period_panel + '<section class="panel"><h2>モデル別の利用</h2><div class="scroll"><table><thead><tr><th>モデル</th><th>応答</th><th>総トークン</th><th>出力</th></tr></thead><tbody>' + model_rows + '</tbody></table></div></section><section class="panel"><h2>セッション別の利用</h2><p class="meta muted">総トークン順、最大200件。作業分類はキーワードによる参考値。全件は report.json に保存しています。</p><input id="filter" aria-label="セッションを絞り込む" placeholder="分類・セッションIDで絞り込み"><div class="scroll"><table id="sessions"><thead><tr><th>セッション / 開始UTC</th><th>作業の参考分類</th><th>応答</th><th>総トークン</th><th>再読込</th><th>失敗</th></tr></thead><tbody>' + session_rows + '</tbody></table></div></section><section class="panel"><h2>この監査で判断できないこと</h2><ul>' + limitations + '</ul><details><summary>欠損・除外を含む集計の詳細</summary><div class="scroll"><table>' + coverage_rows + '</table></div></details></section><footer>このレポート画面は通信しません。会話本文とパスはこの画面に含めません。根拠の実ファイルはローカルの local-map.json で確認できます。</footer></main><script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#sessions tbody tr").forEach(function(row){row.hidden=!row.textContent.toLowerCase().includes(q);});});</script></body></html>'
 
 
 def write_reports(destination, report, local_map):
