@@ -24,14 +24,15 @@ def main():
         before = hashlib.sha256(source.read_bytes()).hexdigest()
         subprocess.run([sys.executable, str(ROOT / "scripts" / "install_skill.py"), "--destination", str(folder / "skill")], check=True, capture_output=True)
         runner = folder / "skill" / "scripts" / "run.py"
-        subprocess.run([sys.executable, str(runner), "--source", str(source), "--all", "--output", str(folder / "report"),
-                        "--deep", "--reference-prices"], check=True, capture_output=True, cwd=str(folder))
+        subprocess.run([sys.executable, str(runner), "--source", str(source), "--all", "--output", str(folder / "report")], check=True, capture_output=True, cwd=str(folder))
         for name in ("report.json", "summary.md", "report.html", "local-map.json"):
             assert (folder / "report" / name).is_file(), name
         r = json.loads((folder / "report" / "report.json").read_text())
         assert r["coverage"]["unique_requests"] == 1
         assert r["cost"]["priced_requests"] == 1
         assert r["totals"]["output_tokens"] == 10
+        assert r["deep"]["diagnosis"]["cache_writes"]["reconciles_to_total"]
+        assert r["deep"]["diagnosis"]["cost_coverage"]["unknown_ttl_write_tokens"] == 200
         assert r["deep"]["summary"]["requests"] == 1
         assert r["deep"]["summary"]["priced_requests"] == 1
         assert r["deep"]["executions"][0]["trajectory"][0]["context_tokens"] == 800

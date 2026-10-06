@@ -230,7 +230,7 @@ class DeepAudit:
                 "context_delta": context(after) - context(before) if complete_pair else None,
                 "next_cache_write_tokens": after["usage"]["cache_creation_input_tokens"] if after and after["complete"] else None,
                 "order_ambiguous": ambiguous})
-        return {"schema_version": 1, "ranking_basis": "api_equivalent_usd_upper" if priced_all else "input_tokens",
+        detail = {"schema_version": 1, "ranking_basis": "api_equivalent_usd_upper" if priced_all else "input_tokens",
             "summary": aggregate(report["requests"], prices),
             "coverage": {"main_executions": sum(not e["subagent"] for e in executions),
                 "subagent_executions": sum(e["subagent"] for e in executions),
@@ -257,3 +257,8 @@ class DeepAudit:
                 "ツール結果は保存されたテキストのUTF-8バイト数。トークン数・モデルが実際に受け取った量ではなく、画像・省略済み結果は含みません。",
                 "結果前後・圧縮前後の文脈差は時刻上の隣接。並列処理等の影響があり因果関係は未確定。同時刻・欠損時は差を算出しません。",
                 "全時系列はreport.json、画面は上位実行・候補のみ。原文の意味・成果物の品質は根拠行を別途確認します。"]}
+
+        from .diagnosis import diagnose
+        detail["diagnosis"] = diagnose(report, detail, prices, by_session, self.compactions,
+                                        {rid for rid, owners in self.owners.items() if len(owners) > 1})
+        return detail

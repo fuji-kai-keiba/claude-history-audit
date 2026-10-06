@@ -40,7 +40,11 @@ def markdown(report):
         "## API単価による参考額", "", cost_text(report), "", report["cost"]["basis"],
         "単価表の基準日: " + str(report["cost"].get("price_book_as_of") or "未指定") + "。過去の請求単価の再現ではありません。",
         f"換算済み {report['cost']['priced_requests']} / 未換算 {report['cost']['unpriced_requests']} 応答。未換算分は0円ではありません。", "",
-        "## 改善候補", ""]
+        ]
+    diagnosis = report.get("deep", {}).get("diagnosis")
+    if diagnosis:
+        lines += diagnosis_markdown(diagnosis)
+    lines += ["## 改善候補", ""]
     for f in report["findings"]:
         lines.extend(["### " + f["title"], "", "観測: " + f["observation"], "", "解釈: " + f["interpretation"],
                       "", "次の検証: " + f["action"], ""])
@@ -97,7 +101,7 @@ def render_html(report):
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
 <title>Claude Code 履歴監査</title><style>
 :root{color-scheme:light;--ink:#172d31;--muted:#597073;--line:#d9e2de;--paper:#f4f6f2;--accent:#297969}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.8 -apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN",Meiryo,sans-serif}main{max-width:1200px;margin:auto;padding:46px 32px 70px}header{border-bottom:1px solid var(--line);padding-bottom:27px}.eyebrow{letter-spacing:.16em;font-size:12px;color:var(--accent);font-weight:700}h1{font-size:34px;letter-spacing:-.04em;line-height:1.4;margin:12px 0}h2{font-size:20px;margin:0 0 17px}h3{font-size:17px;margin:0}.muted,small{color:var(--muted)}header p{margin:8px 0}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:26px 0}.stat{background:#fff;border:1px solid var(--line);border-radius:12px;padding:21px}.stat span{color:var(--muted);font-size:13px}.stat strong{display:block;font-size:27px;line-height:1.5;margin:9px 0;overflow-wrap:anywhere}.stat small{font-size:11px;display:block}.grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:25px;margin-bottom:20px}.bar-row{display:grid;grid-template-columns:120px 1fr 105px;gap:12px;align-items:center;margin:14px 0;font-size:13px}.bar-row b{text-align:right;font-variant-numeric:tabular-nums}.track{height:13px;border-radius:3px;background:#edf1ed;overflow:hidden}.track i{height:100%;display:block}.notice{background:#edf4f0;padding:17px;border-left:3px solid var(--accent);font-size:13px}.finding{border-top:1px solid var(--line);padding:22px 0}.finding:first-of-type{border-top:0;padding-top:0}.finding:last-child{padding-bottom:0}.finding-head{display:flex;gap:12px;align-items:center}.tag{font-size:11px;color:#775420;background:#f7eedc;border-radius:4px;padding:2px 8px;white-space:nowrap}.finding p{margin:8px 0;font-size:14px}.finding p b{margin-right:8px}details{font-size:12px;color:var(--muted)}summary{cursor:pointer}code{font-family:ui-monospace,SFMono-Regular,monospace;font-size:12px;overflow-wrap:anywhere}.scroll{overflow-x:auto}.scroll table{min-width:640px}table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}th{color:var(--muted);font-weight:500;font-size:12px}td,th{padding:12px 10px;border-bottom:1px solid var(--line);vertical-align:top}td small{display:block;font-size:11px}input{font:inherit;padding:9px 13px;border:1px solid var(--line);border-radius:7px;max-width:100%;width:340px;margin-bottom:15px}ul{padding-left:21px;font-size:13px}footer{font-size:12px;color:var(--muted)}.meta{font-size:12px}.metrics{display:flex;gap:25px;flex-wrap:wrap}.metrics strong{font-size:25px;display:block}.metrics span{font-size:12px;color:var(--muted)}@media(max-width:900px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}@media(max-width:550px){main{padding:24px 15px}.cards{gap:8px}.stat{padding:14px}.stat strong{font-size:22px}h1{font-size:27px}.panel{padding:18px}.bar-row{grid-template-columns:90px 1fr 80px;gap:7px;font-size:11px}}@media print{body{background:#fff}main{max-width:none;padding:0}.panel,.stat{break-inside:avoid}.cards{grid-template-columns:repeat(4,1fr)}input{display:none}}
-</style></head><body><main><header><div class="eyebrow">CLAUDE HISTORY AUDIT · LOCAL REPORT</div><h1>履歴から、次の改善を見つける。</h1><p>保存済みの作業を集計した監査レポート。観測と改善仮説を分けて確認します。</p><p class="meta">''' + esc(c["first_record"]) + ' → ' + esc(c["last_record"]) + '（UTC） · 作成 ' + esc(report["generated_at"]) + '</p></header>' + scope + '<div class="cards">' + cards + '''</div><div class="grid"><section class="panel"><h2>トークンの内訳</h2>''' + bars + '''<p class="muted meta">読み出しは低単価のキャッシュを含みます。トークン数と費用は比例しません。</p></section><section class="panel"><h2>処理とカバレッジ</h2><div class="metrics">''' + ''.join(f'<div><strong>{fmt(v)}</strong><span>{esc(k)}</span></div>' for k, v in [("対象ファイル", c["files_found"]), ("ツール実行", m["tool_calls"]), ("明示的な失敗", m["tool_errors"])]) + '</div><p class="meta">使用量が揃う応答 ' + f'{c["complete_usage_requests"]} / {c["unique_requests"]}' + ' · 重複レコード ' + str(c.get("duplicate_usage_records", 0)) + '</p><div class="notice">' + esc(report["cost"]["basis"]) + f'<br>換算済み {report["cost"]["priced_requests"]} / 未換算 {report["cost"]["unpriced_requests"]}。未換算分は0円ではありません。' + '</div></section></div><section class="panel"><h2>根拠付きの改善候補</h2>' + findings + '</section>' + deep_html(report.get("deep")) + '<section class="panel"><h2>モデル別の利用</h2><div class="scroll"><table><thead><tr><th>モデル</th><th>応答</th><th>総トークン</th><th>出力</th></tr></thead><tbody>' + model_rows + '</tbody></table></div></section><section class="panel"><h2>セッション別の利用</h2><p class="meta muted">総トークン順、最大200件。作業分類はキーワードによる参考値。全件は report.json に保存しています。</p><input id="filter" aria-label="セッションを絞り込む" placeholder="分類・セッションIDで絞り込み"><div class="scroll"><table id="sessions"><thead><tr><th>セッション / 開始UTC</th><th>作業の参考分類</th><th>応答</th><th>総トークン</th><th>再読込</th><th>失敗</th></tr></thead><tbody>' + session_rows + '</tbody></table></div></section><section class="panel"><h2>この監査で判断できないこと</h2><ul>' + limitations + '</ul><details><summary>欠損・除外を含む集計の詳細</summary><div class="scroll"><table>' + coverage_rows + '</table></div></details></section><footer>このレポート画面は通信しません。会話本文とパスはこの画面に含めません。根拠の実ファイルはローカルの local-map.json で確認できます。</footer></main><script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#sessions tbody tr").forEach(function(row){row.hidden=!row.textContent.toLowerCase().includes(q);});});</script></body></html>'
+</style></head><body><main><header><div class="eyebrow">CLAUDE HISTORY AUDIT · LOCAL REPORT</div><h1>履歴から、次の改善を見つける。</h1><p>保存済みの作業を集計した監査レポート。観測と改善仮説を分けて確認します。</p><p class="meta">''' + esc(c["first_record"]) + ' → ' + esc(c["last_record"]) + '（UTC） · 作成 ' + esc(report["generated_at"]) + '</p></header>' + scope + '<div class="cards">' + cards + '''</div><div class="grid"><section class="panel"><h2>トークンの内訳</h2>''' + bars + '''<p class="muted meta">読み出しは低単価のキャッシュを含みます。トークン数と費用は比例しません。</p></section><section class="panel"><h2>処理とカバレッジ</h2><div class="metrics">''' + ''.join(f'<div><strong>{fmt(v)}</strong><span>{esc(k)}</span></div>' for k, v in [("対象ファイル", c["files_found"]), ("ツール実行", m["tool_calls"]), ("明示的な失敗", m["tool_errors"])]) + '</div><p class="meta">使用量が揃う応答 ' + f'{c["complete_usage_requests"]} / {c["unique_requests"]}' + ' · 重複レコード ' + str(c.get("duplicate_usage_records", 0)) + '</p><div class="notice">' + esc(report["cost"]["basis"]) + f'<br>換算済み {report["cost"]["priced_requests"]} / 未換算 {report["cost"]["unpriced_requests"]}。未換算分は0円ではありません。' + '</div></section></div>' + diagnosis_html(report.get("deep", {}).get("diagnosis")) + '<section class="panel"><h2>根拠付きの改善候補</h2>' + findings + '</section>' + deep_html(report.get("deep")) + '<section class="panel"><h2>モデル別の利用</h2><div class="scroll"><table><thead><tr><th>モデル</th><th>応答</th><th>総トークン</th><th>出力</th></tr></thead><tbody>' + model_rows + '</tbody></table></div></section><section class="panel"><h2>セッション別の利用</h2><p class="meta muted">総トークン順、最大200件。作業分類はキーワードによる参考値。全件は report.json に保存しています。</p><input id="filter" aria-label="セッションを絞り込む" placeholder="分類・セッションIDで絞り込み"><div class="scroll"><table id="sessions"><thead><tr><th>セッション / 開始UTC</th><th>作業の参考分類</th><th>応答</th><th>総トークン</th><th>再読込</th><th>失敗</th></tr></thead><tbody>' + session_rows + '</tbody></table></div></section><section class="panel"><h2>この監査で判断できないこと</h2><ul>' + limitations + '</ul><details><summary>欠損・除外を含む集計の詳細</summary><div class="scroll"><table>' + coverage_rows + '</table></div></details></section><footer>このレポート画面は通信しません。会話本文とパスはこの画面に含めません。根拠の実ファイルはローカルの local-map.json で確認できます。</footer></main><script>document.getElementById("filter").addEventListener("input",function(){const q=this.value.toLowerCase();document.querySelectorAll("#sessions tbody tr").forEach(function(row){row.hidden=!row.textContent.toLowerCase().includes(q);});});</script></body></html>'
 
 
 def write_reports(destination, report, local_map):
@@ -205,3 +209,51 @@ def deep_html(deep):
               [[r["timestamp"], fmt(r["context_before"]), fmt(r["context_after"]), fmt(r["context_delta"]), fmt(r["next_cache_write_tokens"]), evidence_text(r["evidence"])] for r in deep["compactions"][:20]]))
     result += section("深掘りのカバレッジと解釈", '<ul>' + ''.join('<li>' + esc(line) + '</li>' for line in deep["interpretation"]) + '</ul><details><summary>対応できなかった記録と欠損</summary>' + table(["項目", "件数"], c.items()) + '</details>')
     return result
+
+
+
+def diagnosis_markdown(diagnosis):
+    c = diagnosis["cost_coverage"]
+    lines = ["## 初回診断：費用の観測と未確認の原因", "",
+             "CLIの原因候補です。本文の意味・成果物品質は未確認。Claude Codeで根拠行の確認まで進めてから結論にします。", "",
+             f"未換算 {c['unpriced_requests']} 応答、未換算の観測トークン {fmt(sum(c['unpriced_tokens'].values()))}。",
+             f"書込TTL不明 {c['unknown_ttl_requests']} 応答 / {fmt(c['unknown_ttl_write_tokens'])} tokens。金額の上下幅を単一額に置き換えない。", "",
+             "### キャッシュ書込の観測条件別内訳", "", diagnosis["cache_writes"]["basis"], "",
+             "| 条件 | 応答 | 書込tokens | 書込参考額 | 未換算応答 |", "|---|---:|---:|---:|---:|"]
+    for b in diagnosis["cache_writes"]["buckets"]:
+        lines.append(f"| {b['label']} | {b['requests']} | {fmt(b['write_tokens'])} | {money(b['cost_usd_range'])} | {b['unpriced_requests']} |")
+    lines += ["", "各書込応答は1分類だけに含み、未分類を含めたトークン合計を照合済み。金額は各分類の換算できた書込だけです。", "",
+              "### サブエージェントのモデル実績", "", "| モデル | 実行 | 応答 | API参考額 | 未換算 |", "|---|---:|---:|---:|---:|"]
+    for item in diagnosis["subagent_models"]:
+        lines.append(f"| {item['model']} | {item['executions']} | {item['requests']} | {money(item['cost_usd_range'])} | {item['unpriced_requests']} |")
+    lines += ["", "モデルを途中で変えた実行は複数行に現れるため、実行数は行間で合算しない。", "",
+              "### 初回に確認する根拠と比較方法", ""]
+    for p in diagnosis["priorities"]:
+        lines += ["#### " + p["title"], "", "観測: " + p["observation"] + " 観測参考額 " + money(p["cost_usd_range"]) + f" / 未換算 {p['unpriced_requests']} 応答。",
+                  "", "仮説（未確認）: " + p["hypothesis"], "", "根拠: " + ", ".join(evidence_text(e) for e in p["evidence"]),
+                  "", "原文確認: " + p["confirm"], "", "比較実験: " + p["experiment"], ""]
+    lines += ["### 結論を出す前の点検", ""] + ["- " + line for line in diagnosis["interpretation_checks"]] + [""]
+    return lines
+
+
+def diagnosis_html(diagnosis):
+    if not diagnosis:
+        return ""
+    esc = lambda value: html.escape(str(value), quote=True)
+    c = diagnosis["cost_coverage"]
+    body = '<section class="panel"><h2>初回診断：費用の観測と未確認の原因</h2><div class="notice">本文の意味・成果物品質はCLIでは未確認。根拠行を確認する前に、候補を確定原因や削減額と呼ばないでください。</div><p>'
+    body += esc(f"未換算 {c['unpriced_requests']} 応答 / {fmt(sum(c['unpriced_tokens'].values()))} tokens。書込TTL不明 {c['unknown_ttl_requests']} 応答 / {fmt(c['unknown_ttl_write_tokens'])} tokens。") + '</p>'
+    body += '<h3>キャッシュ書込の観測条件別内訳</h3><p class="meta">' + esc(diagnosis["cache_writes"]["basis"]) + '</p><div class="scroll"><table><tr><th>条件</th><th>応答</th><th>書込tokens</th><th>書込参考額</th><th>未換算</th></tr>'
+    for b in diagnosis["cache_writes"]["buckets"]:
+        body += '<tr>' + ''.join('<td>' + esc(v) + '</td>' for v in [b['label'],b['requests'],fmt(b['write_tokens']),money(b['cost_usd_range']),b['unpriced_requests']]) + '</tr>'
+    body += '</table></div><p class="meta">各書込応答は1分類にだけ計上。金額は換算できた書込の小計です。条件の重なり・不明・未分類を別に残します。</p>'
+    body += '<h3>サブエージェントのモデル実績</h3><div class="scroll"><table><tr><th>モデル</th><th>実行</th><th>応答</th><th>参考額</th><th>未換算</th></tr>'
+    for item in diagnosis["subagent_models"]:
+        body += '<tr>' + ''.join('<td>' + esc(v) + '</td>' for v in [item['model'],item['executions'],item['requests'],money(item['cost_usd_range']),item['unpriced_requests']]) + '</tr>'
+    body += '</table></div><p class="meta">モデル変更した実行は複数行に現れます。実行数を行間で合算しないでください。</p><h3>初回に確認する根拠と比較方法</h3>'
+    for p in diagnosis['priorities']:
+        body += '<article class="finding"><h3>' + esc(p['title']) + '</h3><p><b>観測</b> ' + esc(p['observation']) + ' / ' + esc(money(p['cost_usd_range'])) + esc(f" / 未換算 {p['unpriced_requests']} 応答") + '</p>'
+        for label, key in [('仮説（未確認）','hypothesis'),('原文確認','confirm'),('比較実験','experiment')]:
+            body += '<p><b>' + label + '</b> ' + esc(p[key]) + '</p>'
+        body += '<p class="meta">根拠: ' + esc(', '.join(evidence_text(e) for e in p['evidence'])) + '</p></article>'
+    return body + '<h3>結論を出す前の点検</h3><ul>' + ''.join('<li>' + esc(t) + '</li>' for t in diagnosis['interpretation_checks']) + '</ul></section>'

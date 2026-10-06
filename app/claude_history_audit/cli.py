@@ -50,8 +50,12 @@ def main(argv=None):
     parser.add_argument("--output", type=Path, help="新しい出力フォルダ。既定: ~/.claude-history-audit/reports/日時")
     price = parser.add_mutually_exclusive_group()
     price.add_argument("--price-book", type=Path, help="明示指定したAPI単価表で参考額を計算。請求額ではありません")
-    price.add_argument("--reference-prices", action="store_true", help="同梱の標準API参考単価表を使用。実請求ではありません")
-    parser.add_argument("--deep", action="store_true", help="文脈推移・親子実行・再試行・ツール結果量・圧縮前後を追加監査")
+    price.add_argument("--reference-prices", action="store_true", help="同梱の標準API参考単価表を使用（既定）。実請求ではありません")
+    price.add_argument("--no-prices", action="store_true", help="API参考換算を行わず使用量だけ集計")
+    detail = parser.add_mutually_exclusive_group()
+    detail.add_argument("--deep", dest="deep", action="store_true", help="詳細監査を実行（既定・互換用）")
+    detail.add_argument("--summary-only", dest="deep", action="store_false", help="明示的に詳細診断を省いた軽量集計")
+    parser.set_defaults(deep=True)
     parser.add_argument("--open", action="store_true", help="作成後、ローカルHTMLをブラウザで開く")
     parser.add_argument("--sources-config", type=Path, help="取得先設定。省略時は ~/.claude-history-audit/sources.json があれば使用")
     parser.add_argument("--local-only", action="store_true", help="登録先に接続せず、この環境の既定の履歴だけを監査")
@@ -73,7 +77,7 @@ def main(argv=None):
         dest = output.expanduser().resolve()
         if dest.exists() or dest.is_symlink():
             raise ValueError("出力先は新しいフォルダを指定してください。")
-        prices = load_prices(Path(__file__).with_name("reference_prices.json") if args.reference_prices else args.price_book)
+        prices = load_prices(None if args.no_prices else args.price_book or Path(__file__).with_name("reference_prices.json"))
         registry_path = (args.sources_config or default_config()).expanduser()
         if not args.source and not args.local_only and (args.sources_config or registry_path.exists()):
             config = read_config(registry_path)
