@@ -69,6 +69,34 @@ def private_write(path, content):
             os.unlink(tmp)
 
 
+def lean(value, depth=0):
+    """Drop opaque payloads (thinking signatures, redacted thinking, base64 images/documents) before
+    truncation so the excerpt budget goes to readable text. The record hash still covers the raw line."""
+    if depth > 8:
+        return value
+    if isinstance(value, list):
+        return [lean(v, depth + 1) for v in value]
+    if not isinstance(value, dict):
+        return value
+    kind = value.get('type')
+    if kind == 'thinking':
+        text = value.get('thinking') if isinstance(value.get('thinking'), str) else ''
+        return {'type': 'thinking', 'thinking': text} if text else {'type': 'thinking', 'omitted': True}
+    if kind == 'redacted_thinking':
+        data = value.get('data')
+        return {'type': 'redacted_thinking', 'omitted_chars': len(data) if isinstance(data, str) else None}
+    out = {}
+    for key, item in value.items():
+        if key == 'signature' and isinstance(item, str):
+            continue
+        if key == 'source' and isinstance(item, dict) and isinstance(item.get('data'), str):
+            out[key] = {k: v for k, v in item.items() if k != 'data'}
+            out[key]['omitted_chars'] = len(item['data'])
+            continue
+        out[key] = lean(item, depth + 1)
+    return out
+
+
 def read_selected(files, refs):
     """One streaming scan per file, bounded record size, no symlink traversal."""
     wanted = defaultdict(set)
@@ -110,7 +138,7 @@ def read_selected(files, refs):
                         from .codex import excerpt
                         text = excerpt(row)
                     else:
-                        text = json.dumps(message.get('content', ''), ensure_ascii=False)
+                        text = json.dumps(lean(message.get('content', '')), ensure_ascii=False)
                     timestamp = parse_time(row.get('timestamp'))
                     records[(fid, n)] = {'file': fid, 'line': n, 'sha256': hashlib.sha256(raw).hexdigest(),
                         'type': row.get('type') if row.get('type') in ('assistant','user','system') else 'unknown',
