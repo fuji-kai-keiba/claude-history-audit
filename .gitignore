@@ -13,3 +13,9 @@ local-map.json
 report.json
 report.html
 summary.md
+*.private.json
+*.private.md
+*.private.html
+*.private/
+review-plan.json
+review-status.json

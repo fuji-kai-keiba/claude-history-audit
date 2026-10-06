@@ -122,7 +122,10 @@ def diagnose(report, deep, prices, by_session, compactions, ambiguous_ids):
             'hypothesis':'この分類は同時に観測した条件。初回投入、追記、失効、設定変更による再書込の原因分離は未完了。',
             'confirm':'書込の大きい根拠行と直前の行で、入力変更・間隔・モデル・圧縮を照合する。残額を通常の追記と断定しない。',
             'experiment':'同じ作業・モデルで入力配置と引継ぎ方法を1つずつ変え、書込だけでなく読出・出力・品質も比較する。'})
-    return {'schema_version':1, 'status':'observed_candidates_semantic_review_required',
+    from .insights import analyze
+    analysis = analyze(report, deep, prices, by_session, compactions, ambiguous_ids, writes)
+    return {'schema_version':2, 'status':'observed_candidates_semantic_review_required',
+        'analysis': analysis,
         'cost_coverage':coverage, 'cache_writes':writes, 'subagent_models':subagents,
         'priorities':priorities,
         'interpretation_checks':[

@@ -1,6 +1,6 @@
 ---
 name: claude-history-audit
-description: Claude Code履歴を監査し、トークン・キャッシュ・重複読込・ツール失敗を調べる。登録した別PC・サーバーからの自動取得、過去のAI利用コストや資料作成の手戻りの診断に使う。
+description: Claude Code履歴から原因候補を比較し、根拠確認・具体的な改善策・優先順位・完了検査まで一回で行う。利用コスト、休憩後のキャッシュ再書込、長い文脈、資料作成の手戻りの監査に使う。
 ---
 
 # Claude Code 履歴監査
@@ -36,6 +36,30 @@ WindowsはPython 3.9以降が必要。初回導入後はログイン中に15分�
 監査依頼には毎回この手順を適用する。集計だけで終了し、「次は深掘りします」とユーザーへ追加指示を求めない。アクセスできる履歴の追加集計・根拠確認は初回中に実施する。比較実験、利用環境の設定変更、取得できない履歴の調査は未実施として区別する。
 
 CLIは通常実行で詳細診断と標準API参考額を出す。`--deep --reference-prices` は互換フラグで、指定不要。ユーザーが集計だけを明示した場合や実際の資源制約がある場合のみ `--summary-only` を使い、詳細未実施と伝える。Windowsでは `py -3` も使える。
+
+### 必須の実行手順（同じ監査の中で完了する）
+
+1. 通常コマンドを実行し、`summary.md` と `review-plan.json` を読む。`deep.diagnosis.analysis` に休憩間隔別の母集団、同じ実行・モデルでの比較、検出しなかった仮説、具体的な変更案、対象費用の順位がある。終了コード4や `integrity_failed` / `no_usage_data` は成功扱いにしない。
+2. **計画の全項目**（条件に該当した改善候補＋上位10作業）に対して次のコマンドを実行し、抜粋を実際に読む。項目IDとフォルダは生成された値を使う。コマンドは閲覧記録を残す。取得不能はavailable=false、本文省略はtruncated=true。省略で判断できなければ必要な部分だけ追加確認する。根拠は私的情報であり、外部送信やGit登録をしない。これは現在のClaudeが読むためのコマンドであり、追加のLLM呼び出しはしない。
+
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" review evidence "/path/to/report" --item "finding-1"
+   ```
+
+3. 自動生成された `review-notes.private.json` を現在のClaudeが埋める。項目を削除したり複製したりしない。各項目に、実際に読んだ `evidence`（file/line）、`observation`（確認できた内容）、`interpretation`（候補が当てはまるか）、`alternatives`（代替説明）、`action`（この作業の何を変えるか）、`validation`（品質と総費用の比較方法）を記録する。定型文を全項目へ複製せず、目的と資料・操作の内容に合わせる。
+   - `status=supported_hypothesis`: 根拠から支持される仮説。原因確定という意味ではない。
+   - `status=necessary`: 現在の処理が必要と判断した範囲。削減を無理に提案しない。
+   - `status=rejected`: 自動候補は原文に当てはまらない。反証を書く。
+   - `status=unresolved`: 不足している証拠と判断できない理由を書く。原文を読めた場合は未解決でも根拠を引用する。
+4. 必ず完了検査を実行する。未記入・項目漏れ・根拠未閲覧・別レポートの引用・確認後の原文変更は失敗する。失敗を修正して再実行し、取得不能や識別不能は理由を付けて未解決として残す。人間へ「深掘りしますか」と追加指示を求めない。
+
+   ```bash
+   python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" review finalize "/path/to/report"
+   ```
+
+5. `review-status.json` と `diagnosis-reviewed.private.md` を確認してから最終回答する。機械検査は項目充足と根拠の同一性を確かめるもので、Claudeの意味判断の正しさ・成果物品質を証明しない。未解決は最終回答にも残す。私的なレビュー本文を公開用の集計JSON/HTMLやクラウドに混ぜない。
+
+### 最終回答で満たす内容
 
 1. **金額と対象を検証する。** `summary.md` と `report.json` の `window`、取得状態、欠損、`deep.diagnosis.cost_coverage` を読む。$合計は換算済み部分の小計と明示し、未換算は件数だけでなくトークン量・モデルも確認。TTL不明の書込は金額の上下幅を保持する。日付範囲外の元セッション開始日を今回の集計期間と混同しない。
 2. **上位作業を特定する。** `deep.groups` の上位10件（不足なら全件）と関連する `deep.executions` を抽出する。`ranking_basis` が入力順なら費用上位と呼ばない。親子の合算と未紐付けを区別し、実行数を人間の会話数や成果物数と同一視しない。

@@ -115,6 +115,12 @@ def write_reports(destination, report, local_map):
         outputs = {"report.json": json.dumps(report, ensure_ascii=False, indent=2) + "\n",
                    "local-map.json": json.dumps(local_map, ensure_ascii=False, indent=2) + "\n",
                    "summary.md": markdown(report), "report.html": render_html(report)}
+        from .evidence import plan_for, notes_for, snapshot_for
+        plan = plan_for(report)
+        if plan:
+            outputs['review-plan.json'] = json.dumps(plan, ensure_ascii=False, indent=2) + '\n'
+            outputs['review-notes.private.json'] = json.dumps(notes_for(plan), ensure_ascii=False, indent=2) + '\n'
+            outputs['evidence-snapshot.private.json'] = json.dumps(snapshot_for(local_map, plan), ensure_ascii=False, indent=2) + '\n'
         for name, content in outputs.items():
             fd = os.open(str(staging / name), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
@@ -214,7 +220,7 @@ def deep_html(deep):
 
 def diagnosis_markdown(diagnosis):
     c = diagnosis["cost_coverage"]
-    lines = ["## 初回診断：費用の観測と未確認の原因", "",
+    lines = analysis_markdown(diagnosis.get('analysis')) + ["## 初回診断：費用の観測と未確認の原因", "",
              "CLIの原因候補です。本文の意味・成果物品質は未確認。Claude Codeで根拠行の確認まで進めてから結論にします。", "",
              f"未換算 {c['unpriced_requests']} 応答、未換算の観測トークン {fmt(sum(c['unpriced_tokens'].values()))}。",
              f"書込TTL不明 {c['unknown_ttl_requests']} 応答 / {fmt(c['unknown_ttl_write_tokens'])} tokens。金額の上下幅を単一額に置き換えない。", "",
@@ -226,9 +232,10 @@ def diagnosis_markdown(diagnosis):
               "### サブエージェントのモデル実績", "", "| モデル | 実行 | 応答 | API参考額 | 未換算 |", "|---|---:|---:|---:|---:|"]
     for item in diagnosis["subagent_models"]:
         lines.append(f"| {item['model']} | {item['executions']} | {item['requests']} | {money(item['cost_usd_range'])} | {item['unpriced_requests']} |")
-    lines += ["", "モデルを途中で変えた実行は複数行に現れるため、実行数は行間で合算しない。", "",
-              "### 初回に確認する根拠と比較方法", ""]
-    for p in diagnosis["priorities"]:
+    lines += ["", "モデルを途中で変えた実行は複数行に現れるため、実行数は行間で合算しない。", ""]
+    if not diagnosis.get('analysis'):
+        lines += ["### 初回に確認する根拠と比較方法", ""]
+    for p in ([] if diagnosis.get('analysis') else diagnosis["priorities"]):
         lines += ["#### " + p["title"], "", "観測: " + p["observation"] + " 観測参考額 " + money(p["cost_usd_range"]) + f" / 未換算 {p['unpriced_requests']} 応答。",
                   "", "仮説（未確認）: " + p["hypothesis"], "", "根拠: " + ", ".join(evidence_text(e) for e in p["evidence"]),
                   "", "原文確認: " + p["confirm"], "", "比較実験: " + p["experiment"], ""]
@@ -241,7 +248,7 @@ def diagnosis_html(diagnosis):
         return ""
     esc = lambda value: html.escape(str(value), quote=True)
     c = diagnosis["cost_coverage"]
-    body = '<section class="panel"><h2>初回診断：費用の観測と未確認の原因</h2><div class="notice">本文の意味・成果物品質はCLIでは未確認。根拠行を確認する前に、候補を確定原因や削減額と呼ばないでください。</div><p>'
+    body = analysis_html(diagnosis.get('analysis')) + '<section class="panel"><h2>初回診断：費用の観測と未確認の原因</h2><div class="notice">本文の意味・成果物品質はCLIでは未確認。根拠行を確認する前に、候補を確定原因や削減額と呼ばないでください。</div><p>'
     body += esc(f"未換算 {c['unpriced_requests']} 応答 / {fmt(sum(c['unpriced_tokens'].values()))} tokens。書込TTL不明 {c['unknown_ttl_requests']} 応答 / {fmt(c['unknown_ttl_write_tokens'])} tokens。") + '</p>'
     body += '<h3>キャッシュ書込の観測条件別内訳</h3><p class="meta">' + esc(diagnosis["cache_writes"]["basis"]) + '</p><div class="scroll"><table><tr><th>条件</th><th>応答</th><th>書込tokens</th><th>書込参考額</th><th>未換算</th></tr>'
     for b in diagnosis["cache_writes"]["buckets"]:
@@ -250,10 +257,83 @@ def diagnosis_html(diagnosis):
     body += '<h3>サブエージェントのモデル実績</h3><div class="scroll"><table><tr><th>モデル</th><th>実行</th><th>応答</th><th>参考額</th><th>未換算</th></tr>'
     for item in diagnosis["subagent_models"]:
         body += '<tr>' + ''.join('<td>' + esc(v) + '</td>' for v in [item['model'],item['executions'],item['requests'],money(item['cost_usd_range']),item['unpriced_requests']]) + '</tr>'
-    body += '</table></div><p class="meta">モデル変更した実行は複数行に現れます。実行数を行間で合算しないでください。</p><h3>初回に確認する根拠と比較方法</h3>'
-    for p in diagnosis['priorities']:
+    body += '</table></div><p class="meta">モデル変更した実行は複数行に現れます。実行数を行間で合算しないでください。</p>'
+    if not diagnosis.get('analysis'):
+        body += '<h3>初回に確認する根拠と比較方法</h3>'
+    for p in ([] if diagnosis.get('analysis') else diagnosis['priorities']):
         body += '<article class="finding"><h3>' + esc(p['title']) + '</h3><p><b>観測</b> ' + esc(p['observation']) + ' / ' + esc(money(p['cost_usd_range'])) + esc(f" / 未換算 {p['unpriced_requests']} 応答") + '</p>'
         for label, key in [('仮説（未確認）','hypothesis'),('原文確認','confirm'),('比較実験','experiment')]:
             body += '<p><b>' + label + '</b> ' + esc(p[key]) + '</p>'
         body += '<p class="meta">根拠: ' + esc(', '.join(evidence_text(e) for e in p['evidence'])) + '</p></article>'
     return body + '<h3>結論を出す前の点検</h3><ul>' + ''.join('<li>' + esc(t) + '</li>' for t in diagnosis['interpretation_checks']) + '</ul></section>'
+
+
+def analysis_markdown(analysis):
+    if not analysis:
+        return []
+    a = analysis
+    lines = ['## 自動診断：何を変えるか', '',
+             '整合性: ' + a['status'] + '。原文の意味確認: 未完了（review-plan.json）。', '',
+             a['ranking_note'], '', '### 休憩時間と書き込みの比較', '', a['gap_analysis']['definition'], '',
+             '| 直前の応答からの間隔 | 応答 | 書込あり | 書込中央値 | 全文再書込 / 分母 | 比率 | 書込参考額 | 未換算 |',
+             '|---|---:|---:|---:|---:|---:|---:|---:|']
+    for b in a['gap_analysis']['buckets']:
+        rate = f"{b['full_rewrite_rate']:.1%}" if b['full_rewrite_rate'] is not None else '—'
+        lines.append(f"| {b['label']} | {b['responses']} | {b['write_responses']} | {fmt(b['write_p50'])} | {b['full_rewrites']} / {b['rewrite_denominator']} | {rate} | {money(b['write_cost_usd_range'])} | {b['unpriced_responses']} |")
+    lines += ['', '比較から除外: ' + json.dumps(a['gap_analysis']['excluded'], ensure_ascii=False), '',
+              '### 重なる条件と排他的な分類を区別', '',
+              '| 条件 | 条件を満たす全応答 | うち書込あり | 他の条件と重ならない書込応答 |', '|---|---:|---:|---:|']
+    for s in a['gap_analysis']['signals']:
+        lines.append(f"| {s['code']} | {s['inclusive']['responses']} | {s['inclusive']['write_responses']} | {s['exclusive_write_responses']} |")
+    lines += ['', '条件別の全応答は重複します。排他的な書込内訳と母集団が異なるため、件数を混同しない。', '', '### 同じ実行・モデルでの休憩比較', '']
+    for c in a['resume_comparisons']:
+        reasons = {'supported':'関連を支持する観測あり', 'insufficient_pairs':'比較対象が不足', 'ttl_unconfirmed':'TTLの裏付けが不足', 'no_rewrite_contrast':'層内と全体で一貫した差を検出せず'}
+        lines += [f"- TTL {c['ttl']}: {reasons[c['reason']]}。通常 {c['warm']['responses']} / 再開 {c['cold']['responses']} 応答。比較できない再開 {c['unmatched_cold_responses']} 応答。", '  ' + c['basis']]
+    lines += ['', '### 優先する改善実験', '']
+    if not a['findings']:
+        lines += ['設定した条件を満たす改善候補はありません。履歴の原文確認や品質評価が不要という意味ではありません。', '']
+    for f in a['findings']:
+        impact = f['impact']
+        lines += [f"#### {f['priority']}. {f['title']} ({f['id']})", '',
+                  '対象作業: ' + (f['scope'] or '根拠に示す実行・応答'), '',
+                  f"対象の観測参考額: {money(impact['cost_usd_range'])} / {impact['component']}。未換算 {impact['unpriced_responses']} 応答。削減可能額ではない。", '',
+                  '観測: ' + f['observation'], '', '原因仮説（未確定）: ' + f['hypothesis'], '',
+                  '代替説明: ' + ' / '.join(f['alternatives']), '',
+                  f"関連の確度: {f['association_confidence']}。変更の手間: {f['effort']}。", '',
+                  '**変更案:** ' + f['action'], '', '比較方法: ' + f['validation'], '',
+                  '根拠: ' + ', '.join(evidence_text(e) for e in f['evidence']), '']
+    lines += ['### 検査の実施状況', '']
+    lines += ['- ' + d['code'] + ': ' + d['status'] for d in a['detectors']]
+    lines += ['', '合計・母集団・根拠検査: ' + ', '.join(c['code'] + '=' + ('PASS' if c['passed'] else 'FAIL') for c in a['checks']), '',
+              '### 未確認の範囲', ''] + ['- ' + s for s in a['unknowns']] + ['']
+    return lines
+
+
+def analysis_html(analysis):
+    """Render our generated Markdown subset without external dependencies or raw HTML."""
+    lines = analysis_markdown(analysis)
+    if not lines:
+        return ''
+    body = '<section class="panel">'
+    in_table = False
+    for line in lines:
+        if line.startswith('|'):
+            if set(line.replace('|', '').replace('-', '').replace(':', '').strip()) == set():
+                continue
+            if not in_table:
+                body += '<div class="scroll"><table>'
+                in_table = True
+            body += '<tr>' + ''.join('<td>' + html.escape(v.strip()) + '</td>' for v in line.strip('|').split('|')) + '</tr>'
+            continue
+        if in_table:
+            body += '</table></div>'
+            in_table = False
+        if line.startswith('#### '):
+            body += '<h4>' + html.escape(line[5:]) + '</h4>'
+        elif line.startswith('### '):
+            body += '<h3>' + html.escape(line[4:]) + '</h3>'
+        elif line.startswith('## '):
+            body += '<h2>' + html.escape(line[3:]) + '</h2>'
+        elif line:
+            body += '<p>' + html.escape(line.replace('**', '')) + '</p>'
+    return body + ('</table></div>' if in_table else '') + '</section>'

@@ -36,6 +36,9 @@ def main(argv=None):
     if argv and argv[0] == "cloud":
         from .sync import main as sync_main
         return sync_main(argv[1:])
+    if argv and argv[0] == "review":
+        from .evidence import main as review_main
+        return review_main(argv[1:])
     parser = argparse.ArgumentParser(description="Claude Code履歴を監査。登録済みSSH先は自動取得。履歴変更・LLM呼び出しなし。")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--source", action="append", type=Path, help="JSONLファイルまたはフォルダ。複数指定可。既定: CLAUDE_CONFIG_DIR/projects または ~/.claude/projects")
@@ -109,7 +112,11 @@ def main(argv=None):
         return 2
     c = report["coverage"]
     print(collection_notice(status))
-    print(f"監査完了: {c['sessions']}セッション / {c['unique_requests']}応答 / 改善候補{len(report['findings'])}件")
+    analysis = report.get('deep', {}).get('diagnosis', {}).get('analysis')
+    print(f"集計済み: {c['sessions']}セッション / {c['unique_requests']}応答")
+    if analysis:
+        print(f"自動診断: {analysis['status']} / 具体的な改善候補 {len(analysis['findings'])}件 / 原文確認は未完了")
+        print('同じ監査内で review-plan.json の全項目を確認し、review finalize で完了検査してください。')
     print("参考額: " + cost_text(report) + "（請求額ではありません）")
     print("HTML: " + str(destination / "report.html"))
     print("要約: " + str(destination / "summary.md"))
@@ -117,6 +124,9 @@ def main(argv=None):
     print("local-map.json は実パスを含む私的ファイルです。")
     if args.open:
         webbrowser.open((destination / "report.html").as_uri())
+    if analysis and analysis['status'] != 'automatic_checks_passed':
+        print('自動診断を完了できません。整合性または対象データを確認してください。', file=sys.stderr)
+        return 4
     return 3 if status.get("failed") else 0
 
 
