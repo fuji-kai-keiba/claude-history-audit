@@ -3,6 +3,13 @@
   "source": "https://platform.claude.com/docs/en/about-claude/pricing",
   "unit": "USD per million tokens; standard API list price at as_of, not historical prices or an invoice",
   "models": {
+    "claude-fable-5-1": {
+      "input": 10,
+      "output": 50,
+      "cache_read": 0.25,
+      "cache_write_5m": 12.5,
+      "cache_write_1h": 20
+    },
     "claude-opus-5": {
       "input": 5,
       "output": 25,
