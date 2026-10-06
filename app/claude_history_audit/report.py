@@ -5,7 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 from .collection import collection_notice
-from .periods import UNIT_LABELS, money
+from .periods import UNIT_LABELS, money as period_money
 
 
 def fmt(value):
@@ -33,7 +33,7 @@ def period_markdown(report):
         for r in rows:
             t = r["tokens"]
             lines.append(f"| {r['period']} | {fmt(r['requests'])} | {fmt(t['input_tokens'])} | {fmt(t['cache_creation_input_tokens'])} | "
-                         f"{fmt(t['cache_read_input_tokens'])} | {fmt(t['output_tokens'])} | {money(r['cost_usd_range'], r['priced_requests'], r['requests'])} |")
+                         f"{fmt(t['cache_read_input_tokens'])} | {fmt(t['output_tokens'])} | {period_money(r['cost_usd_range'], r['priced_requests'], r['requests'])} |")
         if len(periods[unit]) > PERIOD_LIMIT:
             lines += ["", f"直近{PERIOD_LIMIT}件のみ表示。全件は report.json の periods にあります。"]
         lines.append("")
@@ -109,7 +109,7 @@ def render_html(report):
         period_panel = '<section class="panel"><h2>期間別の利用</h2><p class="meta muted">区切り: ' + esc(periods["timezone"]) + '。参考額は単価表を指定したときだけ表示します。</p>'
         for unit, opened in (("monthly", " open"), ("weekly", ""), ("daily", " open")):
             rows = "".join('<tr><td>' + esc(r["period"]) + '</td>' + "".join('<td>' + fmt(v) + '</td>' for v in [r["requests"], r["tokens"]["input_tokens"], r["tokens"]["cache_creation_input_tokens"], r["tokens"]["cache_read_input_tokens"], r["tokens"]["output_tokens"]])
-                + '<td>' + esc(money(r["cost_usd_range"], r["priced_requests"], r["requests"])) + '</td></tr>' for r in reversed(periods[unit][-PERIOD_LIMIT:]))
+                + '<td>' + esc(period_money(r["cost_usd_range"], r["priced_requests"], r["requests"])) + '</td></tr>' for r in reversed(periods[unit][-PERIOD_LIMIT:]))
             period_panel += ('<details' + opened + '><summary>' + esc(UNIT_LABELS[unit]) + 'ごと</summary><div class="scroll"><table><thead><tr><th>期間</th><th>応答</th><th>通常入力</th><th>キャッシュ書込</th><th>キャッシュ読出</th><th>出力</th><th>参考額</th></tr></thead><tbody>'
                 + rows + '</tbody></table></div></details>')
         period_panel += '</section>'
