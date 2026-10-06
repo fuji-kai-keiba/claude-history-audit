@@ -271,12 +271,12 @@ def analyze(report, deep, prices, by_session, compactions, ambiguous_ids, writes
     findings.sort(key=lambda f: (-(f['impact']['cost_usd_range'][1] if priced_all and f['impact']['cost_usd_range'] else f['impact']['tokens'] if not priced_all else 0), f['code'], f['scope'] or ''))
     for i, f in enumerate(findings, 1):
         f['priority'] = i
-    # Every top task gets an evidence-review slot, including tasks without a trigger.
+        f['classification'] = 'mechanism_hypothesis_not_problem_verdict'
+    from .discovery import discover
+    discovery = discover(report, deep, prices, by_session, ambiguous_ids)
+    # Rule-independent work selection also covers typical and unexplained work.
     queue = [{'id': f['id'], 'kind': 'finding', 'code': f['code'], 'evidence': f['evidence']} for f in findings]
-    for g in deep['groups'][:10]:
-        rows = [r for sid in g['executions'] for r in by_session.get(sid, [])]
-        queue.append({'id': 'review-' + g['id'], 'kind': 'top_group', 'group': g['id'],
-                      'evidence': unique_evidence(samples(rows, 1) + samples(rows, 1, 'cache_read_input_tokens'))})
+    queue.extend(discovery['review_queue'])
     checks = []
     def check(code, passed):
         checks.append({'code': code, 'passed': bool(passed)})
@@ -291,7 +291,10 @@ def analyze(report, deep, prices, by_session, compactions, ambiguous_ids, writes
         check('write_cost_' + str(bound), costs is None or math.isclose(sum(b['cost_usd_range'][bound] for b in writes['buckets'] if b['cost_usd_range']), costs['cache_write'][bound], rel_tol=1e-8, abs_tol=1e-8))
         check('component_cost_' + str(bound), costs is None or math.isclose(sum(v[bound] for v in costs.values()), report['cost']['usd_range'][bound], rel_tol=1e-8, abs_tol=1e-8))
     check('finding_evidence', all(f['evidence'] for f in findings))
-    return {'version': 1, 'status': ('automatic_checks_passed' if report['requests'] else 'no_usage_data') if all(c['passed'] for c in checks) else 'integrity_failed',
+    for code, passed in discovery['checks'].items():
+        check('discovery_'+code,passed)
+    return {'version': 2, 'status': ('automatic_checks_passed' if report['requests'] else 'no_usage_data') if all(c['passed'] for c in checks) else 'integrity_failed',
+            'discovery':discovery,
             'semantic_status': 'pending', 'ranking_basis': rank,
             'ranking_note': '対象の観測額（全応答換算時）または観測トークンの大きさ順。改善効果や削減額の順位ではない。候補間は重複するため対象額を合算しない。手間と因果の不確かさは別記。',
             'gap_analysis': {'buckets': gap_rows, 'excluded': excluded, 'signals': signals,

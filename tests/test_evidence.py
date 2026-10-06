@@ -11,6 +11,7 @@ from claude_history_audit.audit import audit, load_prices
 from claude_history_audit.report import write_reports
 from claude_history_audit.evidence import inspect_item, finalize, load, TEXT_LIMIT
 from test_insights import resume_rows
+from test_discovery import history
 from test_diagnosis import ROOT
 
 
@@ -36,6 +37,9 @@ class EvidenceTests(unittest.TestCase):
             item.update(status=status,evidence=[e['focus'] for e in packet['excerpts'] if e['available']],
                         observation='合成履歴の観測内容',interpretation='失効と整合するが未確定',alternatives='入力変更の可能性も残る',
                         action='この作業で休憩前の引継ぎを試す',validation='同じ合格基準で総費用と修正回数を比較する')
+            if 'open_review' in item:
+                item['open_review']={'purpose':'合成の調査作業','necessary_work':'調査の根拠確認は必要',
+                                     'unlisted_issues':'合成の抜粋では別の問題は確認できない','missing_information':'成果物の品質は未確認'}
         return notes
 
     def test_inspection_is_bounded_private_and_input_unchanged(self):
@@ -127,6 +131,34 @@ class EvidenceTests(unittest.TestCase):
         notes=self.reviewed()
         (self.out/'review-receipts.private'/(notes['items'][0]['id']+'.json')).unlink()
         with self.assertRaises(OSError):finalize(self.out,notes)
+
+    def test_open_review_cannot_be_skipped(self):
+        notes=self.reviewed()
+        item=next(i for i in notes['items'] if 'open_review' in i)
+        item['open_review']['unlisted_issues']=''
+        with self.assertRaisesRegex(ValueError,'既存ルール以外'):finalize(self.out,notes)
+
+    def test_new_unlisted_issue_requires_real_reviewed_evidence(self):
+        notes=self.reviewed()
+        original=notes['items'][-1]
+        added={k:copy.deepcopy(v) for k,v in original.items() if k!='open_review'}
+        added.update(id='additional-1',review_item=original['id'],observation='合成例の別の反復を原文で確認',interpretation='既存のルールとは異なる仮説')
+        notes['new_findings']=[added]
+        state=finalize(self.out,notes)
+        self.assertEqual(state['additional_findings'],1)
+        self.assertIn('合成例の別の反復',(self.out/'diagnosis-reviewed.private.md').read_text())
+        added['evidence']=[{'file':'file-fake','line':999}]
+        with self.assertRaises(ValueError):finalize(self.out,notes)
+
+    def test_unselected_work_is_kept_in_final_completion_status(self):
+        rows=[]
+        for i in range(100):rows.extend(history('small-'+str(i),count=1))
+        self.source.write_text(''.join(json.dumps(r)+'\n' for r in rows))
+        report,local=audit([self.source],deep=True,prices=load_prices(ROOT/'app/claude_history_audit/reference_prices.json'))
+        self.out=write_reports(self.root/'many',report,local)
+        state=finalize(self.out,self.reviewed('necessary'))
+        self.assertEqual(state['status'],'reviewed_with_limits')
+        self.assertGreater(state['scope']['remaining_works'],0)
 
     def test_symlink_history_not_read_during_review(self):
         backup=self.root/'backup.jsonl'

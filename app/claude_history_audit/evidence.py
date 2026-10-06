@@ -17,6 +17,8 @@ from .audit import MAX_LINE_BYTES, parse_time, iso
 
 TEXT_LIMIT = 2400
 STATUSES = {'supported_hypothesis', 'necessary', 'rejected', 'unresolved'}
+OPEN_FIELDS = {'purpose':'作業の目的', 'necessary_work':'必要だった処理',
+               'unlisted_issues':'既存ルール以外の問題候補', 'missing_information':'不足する情報'}
 
 
 def digest(value):
@@ -31,9 +33,11 @@ def plan_for(report):
 
 
 def notes_for(plan):
-    return {'report_digest': plan['report_digest'], 'items': [
+    return {'report_digest': plan['report_digest'], 'new_findings': [], 'items': [
         {'id': item['id'], 'status': 'pending', 'evidence': [], 'observation': '',
-         'interpretation': '', 'alternatives': '', 'action': '', 'validation': ''} for item in plan['items']]}
+         'interpretation': '', 'alternatives': '', 'action': '', 'validation': '',
+         **({'open_review':{field:'' for field in OPEN_FIELDS}} if item.get('discovery_questions') else {})}
+        for item in plan['items']]}
 
 
 def snapshot_for(local_map, plan):
@@ -172,6 +176,7 @@ def validate_review(folder, notes):
     files = snapshot['files']
     all_refs = [ref for i in plan['items'] for ref in i['evidence']]
     current = read_selected(files, all_refs)
+    verified_by_item = {}
     for item in plan['items']:
         n = by_id[item['id']]
         if n.get('status') not in STATUSES:
@@ -179,6 +184,10 @@ def validate_review(folder, notes):
         for field in ('observation', 'interpretation', 'alternatives', 'action', 'validation'):
             if not isinstance(n.get(field), str) or not n[field].strip():
                 raise ValueError('観測・解釈・代替説明・改善策・比較方法を全て記録してください: ' + item['id'])
+        if item.get('discovery_questions'):
+            open_review=n.get('open_review')
+            if not isinstance(open_review,dict) or any(not isinstance(open_review.get(k),str) or not open_review[k].strip() for k in OPEN_FIELDS):
+                raise ValueError('用途・必要性・既存ルール以外の問題候補・情報不足を確認してください: '+item['id'])
         receipt = load(folder/'review-receipts.private'/(item['id']+'.json'))
         if receipt.get('report_digest') != plan['report_digest'] or receipt.get('id') != item['id']:
             raise ValueError('根拠の閲覧記録が一致しません。')
@@ -207,6 +216,25 @@ def validate_review(folder, notes):
             raise ValueError('結論には閲覧済みで変更されていない根拠行が必要です。')
         if n['status'] == 'unresolved' and verified and not cited:
             raise ValueError('原文を取得できた未解決項目にも、その根拠を記録してください。')
+        verified_by_item[item['id']] = verified
+    additions=notes.get('new_findings',[])
+    if not isinstance(additions,list) or len(additions)>100:
+        raise ValueError('追加発見は最大100件の配列で記録してください。')
+    seen_additions=set()
+    for item in additions:
+        if not isinstance(item,dict) or not isinstance(item.get('id'),str) or not re.fullmatch(r'additional-[0-9]+',item['id']) or item['id'] in seen_additions:
+            raise ValueError('追加発見には一意な additional-数字 のIDが必要です。')
+        seen_additions.add(item['id'])
+        if item.get('status') not in STATUSES or item.get('review_item') not in verified_by_item:
+            raise ValueError('追加発見は既に確認した項目へ紐付けてください。')
+        for field in ('observation','interpretation','alternatives','action','validation'):
+            if not isinstance(item.get(field),str) or not item[field].strip():
+                raise ValueError('追加発見にも観測・解釈・代替説明・変更案・比較方法が必要です。')
+        citations=item.get('evidence')
+        if not isinstance(citations,list) or not citations or any(not isinstance(e,dict) or set(e)!={'file','line'} for e in citations):
+            raise ValueError('追加発見には閲覧済みの根拠を引用してください。')
+        if not {(e['file'],e['line']) for e in citations} <= verified_by_item[item['review_item']]:
+            raise ValueError('追加発見の引用が閲覧済み根拠にありません。')
     return report, plan
 
 
@@ -221,17 +249,29 @@ def finalize(folder, notes=None, notes_path=None):
         private_write(folder/'review-status.json', json.dumps({'status':'review_failed',
             'meaning':'完了検査に失敗。以前の私的診断が残っていても、現在の完了を示さない。'},ensure_ascii=False)+'\n')
         raise
-    unresolved = sum(i['status'] == 'unresolved' for i in notes['items'])
-    state = {'report_digest': plan['report_digest'], 'status': 'reviewed_with_unknowns' if unresolved else 'reviewed',
+    additions=notes.get('new_findings',[])
+    unresolved = sum(i['status'] == 'unresolved' for i in notes['items']+additions)
+    discovery=report['deep']['diagnosis']['analysis'].get('discovery',{})
+    selection=discovery.get('selection',{})
+    limited=bool(selection.get('remaining_works') or discovery.get('omitted_candidates'))
+    state = {'report_digest': plan['report_digest'], 'status': 'reviewed_with_unknowns' if unresolved else 'reviewed_with_limits' if limited else 'reviewed',
              'reviewed_items': len(notes['items']), 'unresolved_items': unresolved,
+             'additional_findings':len(additions),
+             'scope':{k:selection.get(k) for k in ('basis','selected_works','remaining_works','achieved_share')},
+             'omitted_candidates':discovery.get('omitted_candidates',0),
              'meaning': '根拠閲覧・項目充足・原文変更を機械検証。意味判断や成果物品質の正しさを保証する検証ではない。'}
     lines = ['# 根拠確認を終えた監査（私的情報）', '', state['meaning'], '',
              '元の集計は summary.md。参考額は請求額・削減可能額ではありません。', '',
-             '未解決項目: ' + str(unresolved), '']
-    for item in notes['items']:
+             '未解決項目: ' + str(unresolved), '',
+             '選択した作業: '+str(selection.get('selected_works','不明'))+' / 未選択: '+str(selection.get('remaining_works','不明')),
+             '選んだ作業も根拠の一部の確認です。対象外を問題なしと扱わない。', '']
+    for item in notes['items']+additions:
         lines += ['## ' + item['id'] + ' / ' + item['status'], '']
         for label, field in [('観測', 'observation'), ('解釈', 'interpretation'), ('代替説明', 'alternatives'), ('改善策', 'action'), ('比較方法', 'validation')]:
             lines += [label + ': ' + item[field], '']
+        for field,label in OPEN_FIELDS.items():
+            if field in item.get('open_review',{}):
+                lines += [label+': '+item['open_review'][field],'']
         lines += ['根拠: ' + ', '.join(e['file']+':L'+str(e['line']) for e in item['evidence']), '']
     private_write(folder/'diagnosis-reviewed.private.md', '\n'.join(lines))
     private_write(folder/'review-status.json', json.dumps(state, ensure_ascii=False, indent=2)+'\n')

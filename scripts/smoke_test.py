@@ -73,11 +73,28 @@ def main():
                         alternatives='次章の根拠照合に以前の調査が必要な可能性。',
                         action='合成の次章執筆へ調査の要点と出典だけを引き継ぐ。',
                         validation='同じ根拠と章構成で総費用と修正回数を比較する。')
+            if 'open_review' in item:
+                item['open_review']={'purpose':'調査後の次章執筆','necessary_work':'次章に使う出典の確認',
+                                     'unlisted_issues':'合成の抜粋では他の問題は確認できない','missing_information':'次章の実際の品質'}
         (diagnosis/'review-notes.private.json').write_text(json.dumps(notes),encoding='utf-8')
         subprocess.run([sys.executable,str(runner),'review','finalize',str(diagnosis)],check=True,capture_output=True,cwd=str(folder))
         assert json.loads((diagnosis/'review-status.json').read_text())['status']=='reviewed'
         assert (diagnosis/'diagnosis-reviewed.private.md').is_file()
         assert hashlib.sha256(resumed.read_bytes()).hexdigest()==resumed_hash
+        # Smaller-than-fixed-threshold output growth must still be discovered.
+        small=folder/'small-usage.jsonl'
+        small_rows=[]
+        for i in range(20):
+            item=json.loads(json.dumps(rows[0]))
+            item['message']['id']='small-'+str(i)
+            item['timestamp']=(datetime(2026,10,1,tzinfo=timezone.utc)+timedelta(seconds=i)).isoformat()
+            item['message']['usage']['output_tokens']=2000 if i==19 else 10
+            small_rows.append(item)
+        small.write_text(''.join(json.dumps(r)+'\n' for r in small_rows))
+        subprocess.run([sys.executable,str(runner),'--source',str(small),'--all','--output',str(folder/'small-report')],check=True,capture_output=True,cwd=str(folder))
+        personal=json.loads((folder/'small-report/report.json').read_text())['deep']['diagnosis']['analysis']['discovery']
+        assert any(c['kind']=='response_difference' and c['metric']=='output' for c in personal['candidates'])
+        assert personal['selection']['remaining_works']==0
         result = subprocess.run([sys.executable, str(ROOT / "scripts" / "install_skill.py"), "--destination", str(folder / "skill")], capture_output=True)
         assert result.returncode != 0
         # A portable installed skill must discover its persistent source registry.
@@ -107,7 +124,7 @@ def main():
         bad_config.write_text('{}')
         failed = subprocess.run([sys.executable, str(bundle), 'sync', '--config', str(bad_config)], capture_output=True, cwd=str(folder), env=env)
         assert failed.returncode == 2
-    print("PASS: portable skill, first-pass resume diagnosis, required evidence review/finalization, privacy, read-only input, registry, standalone agent and failure exit codes")
+    print("PASS: portable skill, personal baselines, resume diagnosis, required evidence review/finalization, privacy, read-only input, registry, standalone agent and failure exit codes")
     subprocess.run([sys.executable,str(ROOT/'scripts/smoke_sync.py')],check=True)
 
 

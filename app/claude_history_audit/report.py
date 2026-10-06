@@ -272,8 +272,9 @@ def analysis_markdown(analysis):
     if not analysis:
         return []
     a = analysis
-    lines = ['## 自動診断：何を変えるか', '',
+    lines = discovery_markdown(a.get('discovery')) + ['## 原因を調べるための手がかり', '',
              '整合性: ' + a['status'] + '。原文の意味確認: 未完了（review-plan.json）。', '',
+             '以下の固定ルールは処理の特徴を示す候補で、本人にとって異常・不要だという判定ではありません。', '',
              a['ranking_note'], '', '### 休憩時間と書き込みの比較', '', a['gap_analysis']['definition'], '',
              '| 直前の応答からの間隔 | 応答 | 書込あり | 書込中央値 | 全文再書込 / 分母 | 比率 | 書込参考額 | 未換算 |',
              '|---|---:|---:|---:|---:|---:|---:|---:|']
@@ -289,7 +290,7 @@ def analysis_markdown(analysis):
     for c in a['resume_comparisons']:
         reasons = {'supported':'関連を支持する観測あり', 'insufficient_pairs':'比較対象が不足', 'ttl_unconfirmed':'TTLの裏付けが不足', 'no_rewrite_contrast':'層内と全体で一貫した差を検出せず'}
         lines += [f"- TTL {c['ttl']}: {reasons[c['reason']]}。通常 {c['warm']['responses']} / 再開 {c['cold']['responses']} 応答。比較できない再開 {c['unmatched_cold_responses']} 応答。", '  ' + c['basis']]
-    lines += ['', '### 優先する改善実験', '']
+    lines += ['', '### 原文で必要性を確認してから選ぶ改善実験', '']
     if not a['findings']:
         lines += ['設定した条件を満たす改善候補はありません。履歴の原文確認や品質評価が不要という意味ではありません。', '']
     for f in a['findings']:
@@ -306,6 +307,40 @@ def analysis_markdown(analysis):
     lines += ['- ' + d['code'] + ': ' + d['status'] for d in a['detectors']]
     lines += ['', '合計・母集団・根拠検査: ' + ', '.join(c['code'] + '=' + ('PASS' if c['passed'] else 'FAIL') for c in a['checks']), '',
               '### 未確認の範囲', ''] + ['- ' + s for s in a['unknowns']] + ['']
+    return lines
+
+
+def discovery_markdown(d):
+    if not d:
+        return []
+    s=d['selection']
+    status={'differences_to_investigate':'本人の分布と異なる候補あり',
+            'no_difference_detected':'設定した比較では差を検出せず',
+            'insufficient_comparison_data':'比較できる記録が不足'}[d['status']]
+    lines=['## 利用者自身の履歴から調べる', '',status+'。問題の有無を確定した結果ではありません。', '',
+           '### 観測した使い方', '',
+           '| モデル | 親/子 | 用途の参考分類 | 応答 | 使用量が揃う応答 | 入力中央値 | 出力中央値 |',
+           '|---|---|---|---:|---:|---:|---:|']
+    for p in d['profile']:
+        lines.append(f"| {p['model']} | {p['role']} | {p['workload_hint']} | {p['responses']} | {p['complete_responses']} | {fmt(p['context']['p50'])} | {fmt(p['output']['p50'])} |")
+    lines += ['',f"本人内の応答分布を比較できた範囲: {d['assessed_response_ids_count']} 応答。少数・欠損・比較できない条件は無理に正常判定しません。", '',
+              '### 固定の問題パターンに依存しない確認対象', '',
+              f"全 {s['total_works']} 作業から {s['selected_works']} 作業を選択。未選択 {s['remaining_works']} 作業。", '',
+              f"選択した作業の参考額 {money(s['selected']['cost_usd_range'])} / 未選択 {money(s['remaining']['cost_usd_range'])}。それぞれ未換算 {s['selected']['unpriced_requests']} / {s['remaining']['unpriced_requests']} 応答。", '',
+              '選択基準: '+('観測参考額' if s['basis']=='api_equivalent_usd_upper' else '観測トークン（価格の欠損あり）')+
+              '。選んだ作業が占める割合: '+(f"{s['achieved_share']:.1%}" if s['achieved_share'] is not None else '算出不可')+'。', '',
+              s['meaning'], '', '利用が集中する作業に加え、本人内の差がある作業と通常の代表例を確認します。普段から一様にある問題は比較だけでは見つからないため、用途と必要性も原文で調べます。', '',
+              '### 本人内で差がある箇所', '',
+              f"候補 {d['candidate_count']} 件 / 表示・確認対象 {len(d['candidates'])} 件 / 対象外 {d['omitted_candidates']} 件。対象額は重なるため合算しません。", '']
+    for c in d['candidates']:
+        b=c['baseline']
+        lines += [f"#### {c['title']}：{c['metric_label']} ({c['id']})", '',
+                  f"基準の中央値 {fmt(b['median'])}、ばらつきMAD {fmt(b['mad'])}、探索用の境界 {fmt(b['threshold'])}（{c['unit']}）。対象 {c['observed_responses']} 応答。", '',
+                  '観測値: '+fmt(b.get('observed_value',b.get('after_median',c['observed_max'])))+'。対象応答の参考額 '+money(c['impact']['cost_usd_range'])+'。', '',
+                  c['basis'], '', '考えられる別の説明: '+' / '.join(c['alternatives']), '',
+                  '確認と変更案: '+c['action'], '',
+                  '根拠（大きい側と通常側）: '+', '.join(evidence_text(e) for e in c['evidence']), '']
+    lines += ['### この比較で判断できないこと', '']+['- '+s for s in d['limitations']]+['']
     return lines
 
 
