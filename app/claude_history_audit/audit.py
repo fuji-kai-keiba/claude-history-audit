@@ -192,7 +192,7 @@ def estimate(request, prices):
     return [sum(v[i] for v in parts.values()) for i in (0,1)] if parts else None
 
 
-def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False, provider='auto'):
+def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False, provider='auto', config_dir=None):
     if provider not in ('auto','claude','codex'):
         raise ValueError('unknown history provider')
     from .codex import records
@@ -208,6 +208,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
         return kind + "-" + (digest if identity_key else digest[:12])
     from .deep import DeepAudit
     detail = DeepAudit(alias) if deep else None
+    from .anatomy import Anatomy
+    anatomy = Anatomy(alias) if deep else None
     stats = Counter(files_found=len(files), skipped_symlinks=skipped, source_errors=source_errors)
     requests = {}
     sessions = {}
@@ -230,6 +232,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                 continue
             if (since and ts < since) or (until and ts >= until):
                 stats["outside_window"] += 1
+                if anatomy:
+                    anatomy.outside(fid)
                 continue
             stats["records_in_window"] += 1
             raw_session = row.get("sessionId")
@@ -278,6 +282,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                 key = "record:" + fid + ":" + str(line)
             if native:
                 key = 'codex:'+key
+            elif anatomy and row.get("type") in ("assistant", "user"):
+                anatomy.row(fid, sid, is_subagent, row, key, blocks)
             if row.get("type") == "assistant" and message.get("role", "assistant") == "assistant":
                 usage = message.get("usage")
                 if not isinstance(usage, dict):
@@ -487,4 +493,18 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
         ]}
     if detail:
         report["deep"] = detail.build(report, prices, by_session)
+    if anatomy:
+        config = None
+        if config_dir is not None:
+            from .config_audit import audit_config
+            projects, counts = {}, Counter()
+            for sid, cwd in anatomy.cwds.items():
+                if sessions.get(sid, {}).get("subagent"):
+                    continue
+                projects.setdefault(alias("project", cwd), cwd)
+                counts[alias("project", cwd)] += 1
+            config, private = audit_config(config_dir, projects, counts)
+            local_map["config_files"] = private
+            local_map["projects"] = projects
+        report["anatomy"] = anatomy.build(requests, prices, sessions, config)
     return report, local_map

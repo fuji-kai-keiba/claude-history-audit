@@ -108,7 +108,10 @@ def main(argv=None):
             src = source.expanduser().resolve()
             if dest == src or src in dest.parents:
                 raise ValueError("履歴の保存先の中へレポートは書き込みません。別の --output を指定してください。")
-        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep, provider=args.provider or 'auto')
+        local_root = local_source().expanduser().resolve()
+        config_dir = local_root.parent if any(Path(src).expanduser().resolve() == local_root for src in sources) else None
+        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep,
+                                  provider=args.provider or 'auto', config_dir=config_dir)
         report["collection"] = status
         local_map["collection_sources"] = private
         destination = write_reports(output, report, local_map)
