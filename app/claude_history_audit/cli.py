@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import __version__
 from .audit import audit, iso, load_prices
+from .periods import UNITS, Zone, render_table
 from .report import cost_text, write_reports
 from .collection import (collect, collection_notice, default_config, local_source,
                          read_config, sources_main, state_home)
@@ -29,8 +30,69 @@ def instant(text):
         raise argparse.ArgumentTypeError("時刻は 2026-09-06T00:00:00+09:00 のようにUTCオフセット付きで指定してください。")
 
 
+def usage_main(argv):
+    """Terminal tables like ccusage daily/weekly/monthly. Reads local history only; writes nothing."""
+    parser = argparse.ArgumentParser(prog="audit.py usage",
+        description="日別・週別・月別の利用量を表示。この環境の保存履歴（または --source）だけを読み、ファイルは書かず登録済みSSH先にも接続しない。")
+    parser.add_argument("unit", nargs="?", choices=UNITS, default="daily", help="集計単位（既定 daily）")
+    parser.add_argument('--provider', choices=('claude', 'codex', 'auto'), help='既定保存先。省略時はClaude、codexはCodex、autoは両方。--sourceは自動判別')
+    parser.add_argument("--source", action="append", type=Path, help="JSONLファイルまたはフォルダ。複数指定可")
+    window = parser.add_mutually_exclusive_group()
+    window.add_argument("--days", type=int, help="直近N日（既定30）")
+    window.add_argument("--since", help="開始日 YYYY-MM-DD（--timezone の暦で、その日を含む）")
+    window.add_argument("--all", action="store_true", help="残っている全期間")
+    parser.add_argument("--until", help="終了日 YYYY-MM-DD（--timezone の暦で、その日を含む）")
+    parser.add_argument("--timezone", default="local", help="日付の区切り。local（既定・OSの時刻設定）、UTC、+09:00、Asia/Tokyo など")
+    price = parser.add_mutually_exclusive_group()
+    price.add_argument("--price-book", type=Path, help="明示指定したAPI単価表で参考額を表示。請求額ではありません")
+    price.add_argument("--reference-prices", action="store_true", help="同梱の標準API参考単価表（既定）")
+    price.add_argument("--no-prices", action="store_true", help="参考額を出さず使用量だけ表示")
+    parser.add_argument("--breakdown", action="store_true", help="期間ごとにモデル別の行を表示")
+    parser.add_argument("--json", action="store_true", help="表の代わりにJSONを出力")
+    args = parser.parse_args(argv)
+    if args.days is not None and args.days < 1:
+        parser.error("--days は1以上にしてください。")
+    try:
+        zone = Zone(args.timezone)
+        def day(text):
+            try:
+                return datetime.strptime(text, "%Y-%m-%d").date()
+            except ValueError:
+                raise ValueError("日付は YYYY-MM-DD で指定してください: " + text)
+        now = datetime.now(timezone.utc)
+        until = zone.midnight(day(args.until) + timedelta(days=1)) if args.until else now
+        if args.all:
+            since = None
+        elif args.since:
+            since = zone.midnight(day(args.since))
+        else:
+            first_day = zone.convert(until - timedelta(seconds=1)).date() - timedelta(days=(args.days or 30) - 1)
+            since = zone.midnight(first_day)
+        if since and since >= until:
+            raise ValueError("開始日は終了日より前にしてください。")
+        prices = load_prices(None if args.no_prices else args.price_book or Path(__file__).with_name("reference_prices.json"))
+        from .codex import local_sources as codex_sources
+        defaults = codex_sources() if args.provider == 'codex' else ([local_source()] + codex_sources() if args.provider == 'auto' else [local_source()])
+        report, _ = audit(args.source or defaults, since=since, until=until, prices=prices, now=now,
+                          provider=args.provider or 'auto', zone=zone)
+    except (OSError, ValueError, TypeError, OverflowError) as error:
+        print("集計できません: " + str(error), file=sys.stderr)
+        return 2
+    rows = report["periods"][args.unit]
+    if args.json:
+        print(json.dumps({"unit": args.unit, "timezone": report["periods"]["timezone"], "window": report["window"],
+                          "providers": report.get("providers"), "cost_basis": report["cost"]["basis"], "rows": rows},
+                         ensure_ascii=False, indent=2))
+    else:
+        print(render_table(rows, args.unit, report["periods"]["timezone"], args.breakdown))
+        print("参考額はAPI単価による換算で、請求額ではありません。" if prices else "参考額は表示していません（--no-prices）。")
+    return 0
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "usage":
+        return usage_main(argv[1:])
     if argv and argv[0] == "sources":
         return sources_main(argv[1:])
     if argv and argv[0] == "cloud":
@@ -61,6 +123,7 @@ def main(argv=None):
     detail.add_argument("--summary-only", dest="deep", action="store_false", help="明示的に詳細診断を省いた軽量集計")
     parser.set_defaults(deep=True)
     parser.add_argument("--open", action="store_true", help="作成後、ローカルHTMLをブラウザで開く")
+    parser.add_argument("--timezone", default="local", help="期間別の表の日付区切り。local（既定）、UTC、+09:00 など。期間指定はUTCのまま")
     parser.add_argument("--sources-config", type=Path, help="取得先設定。省略時は ~/.claude-history-audit/sources.json があれば使用")
     parser.add_argument("--local-only", action="store_true", help="登録先に接続せず、この環境の既定の履歴だけを監査")
     parser.add_argument("--allow-partial", action="store_true", help="取得失敗時も取得できた範囲でレポート作成。終了コード3で一部取得を通知")
@@ -86,6 +149,7 @@ def main(argv=None):
         if dest.exists() or dest.is_symlink():
             raise ValueError("出力先は新しいフォルダを指定してください。")
         prices = load_prices(None if args.no_prices else args.price_book or Path(__file__).with_name("reference_prices.json"))
+        zone = Zone(args.timezone)
         registry_path = (args.sources_config or default_config()).expanduser()
         if not args.source and not args.local_only and args.provider not in ('codex','auto') and (args.sources_config or registry_path.exists()):
             config = read_config(registry_path)
@@ -111,7 +175,7 @@ def main(argv=None):
         local_root = local_source().expanduser().resolve()
         config_dir = local_root.parent if any(Path(src).expanduser().resolve() == local_root for src in sources) else None
         report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep,
-                                  provider=args.provider or 'auto', config_dir=config_dir)
+                                  provider=args.provider or 'auto', config_dir=config_dir, zone=zone)
         report["collection"] = status
         local_map["collection_sources"] = private
         destination = write_reports(output, report, local_map)
