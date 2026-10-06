@@ -110,6 +110,36 @@ def main():
         combined = json.loads((folder / "collected/report.json").read_text())
         assert combined["collection"]["successful"] == 1
         assert combined["coverage"]["unique_requests"] == 1
+        # Installed CLI discovers native Codex roots without using the Claude registry.
+        sys.path.insert(0,str(ROOT/'tests'))
+        from test_codex import polling_history
+        codex_home=folder/'codex-home'
+        (codex_home/'sessions').mkdir(parents=True)
+        native=codex_home/'sessions/native.jsonl'
+        native.write_text(''.join(json.dumps(r)+'\n' for r in polling_history()))
+        codex_env=dict(env,CODEX_HOME=str(codex_home))
+        codex_out=folder/'codex-report'
+        subprocess.run([sys.executable,str(runner),'--provider','codex','--all','--output',str(codex_out)],
+                       check=True,capture_output=True,cwd=str(folder),env=codex_env)
+        result=json.loads((codex_out/'report.json').read_text())
+        assert result['providers']==['codex'] and result['coverage']['unique_requests']==3
+        assert result['cost']['priced_requests']==3
+        assert any(f['code']=='polling' for f in result['deep']['diagnosis']['analysis']['findings'])
+        notes=json.loads((codex_out/'review-notes.private.json').read_text())
+        for item in notes['items']:
+            packet=subprocess.run([sys.executable,str(runner),'review','evidence',str(codex_out),'--item',item['id']],
+                                  check=True,capture_output=True,cwd=str(folder),env=codex_env)
+            inspected=json.loads(packet.stdout)
+            assert all(e['available'] for e in inspected['excerpts'])
+            assert 'BASE64_PRIVATE' not in packet.stdout.decode()
+            item.update(status='supported_hypothesis',evidence=[e['focus'] for e in inspected['excerpts']],
+                        observation='合成の完了待ちが3回記録されている',interpretation='監視頻度の比較候補',
+                        alternatives='完了をすぐに確認する必要性',action='実行終了時の通知と比較する',validation='応答性と総使用量を比較')
+            if 'open_review' in item:
+                item['open_review']=dict(purpose='合成の完了確認',necessary_work='実行結果の確認',unlisted_issues='他の問題は未確認',missing_information='待機の必要時間')
+        (codex_out/'review-notes.private.json').write_text(json.dumps(notes),encoding='utf-8')
+        subprocess.run([sys.executable,str(runner),'review','finalize',str(codex_out)],check=True,capture_output=True,cwd=str(folder),env=codex_env)
+        assert json.loads((codex_out/'review-status.json').read_text())['status']=='reviewed'
         # The distributed agent must run outside the checkout with no dependencies.
         bundle = folder / 'audit-agent.pyz'
         subprocess.run([sys.executable, str(ROOT / 'scripts/build_agent.py'), '--output', str(bundle)], check=True, capture_output=True)
@@ -124,7 +154,7 @@ def main():
         bad_config.write_text('{}')
         failed = subprocess.run([sys.executable, str(bundle), 'sync', '--config', str(bad_config)], capture_output=True, cwd=str(folder), env=env)
         assert failed.returncode == 2
-    print("PASS: portable skill, personal baselines, resume diagnosis, required evidence review/finalization, privacy, read-only input, registry, standalone agent and failure exit codes")
+    print("PASS: portable skill, native Codex discovery/polling/review, personal baselines, resume diagnosis, required evidence review/finalization, privacy, read-only input, registry, standalone agent and failure exit codes")
     subprocess.run([sys.executable,str(ROOT/'scripts/smoke_sync.py')],check=True)
 
 

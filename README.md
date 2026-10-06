@@ -1,6 +1,6 @@
 # Claude History Audit
 
-Claude Codeの**利用者自身の保存履歴を基準に、問題候補の探索・原文確認・具体的な改善策まで一回の監査で行う**ツールです。特定の利用者の通常値を他の人へ当てはめず、登録したPC・サーバーからの自動取得に対応します。
+Claude Code・Codexの**利用者自身の保存履歴を基準に、問題候補の探索・原文確認・具体的な改善策まで一回の監査で行う**ツールです。特定の利用者の通常値を他の人へ当てはめず、Claudeは登録したPC・サーバーからの自動取得にも対応します。
 
 会話を外部AIへ送らず、Python標準ライブラリだけでJSONLを集計します。ブラウザで見られる日本語HTML、機械処理用JSON、短いMarkdown要約を出力します。Claude Code用の `/claude-history-audit` スキルも同梱しています。
 
@@ -24,7 +24,24 @@ python3 scripts/audit.py --since 2026-10-01 --until 2026-10-05
 python3 scripts/audit.py --source /path/to/pc-a --source /path/to/pc-b --days 30
 ```
 
-日付はUTC。`--until` は指定日を含みます。履歴が削除済みの場合は復元しません。標準の保持期間は30日なので、調査対象を早めに保全してください。
+日付はUTC。`--until` は指定日を含みます。履歴が削除済みの場合は復元しません。Claude Codeの保持設定などで履歴が消えるため、調査対象を早めに保全してください。
+
+## Codexを監査する
+
+```bash
+python3 scripts/audit.py --provider codex --days 30 --open
+python3 scripts/audit.py --provider auto --days 30 --open
+```
+
+Codexは `CODEX_HOME`（未設定なら `~/.codex`）の `sessions` と `archived_sessions` を自動で探します。`auto` はこのPCのClaudeとCodexを集計します。コピー済みの履歴は `--source /path/to/history` で指定できます。Windowsは `py -3`。アカウントへログインして他端末の履歴を取得する機能ではありません。Codex/autoではClaudeのSSH取得設定を使わず、既存Web同期はClaudeのみです。
+
+本人内比較、モデル別・親子別の参考額、文脈増加、圧縮、待機・進捗確認の反復を標準で調べ、根拠行と比較する改善案を出します。Codexでこのリポジトリを開き「Codexの直近30日を監査して」と依頼すれば、`AGENTS.md` が原文確認と完了検査まで案内します。CLI単体の自動診断は内容の必要性・品質を確認済みとは扱いません。
+
+応答別usageを優先し、累計通知の重複加算を避けます。旧形式は差分と最終応答が一致した記録に限定し、欠損・曖昧な記録をカバレッジへ残します。画像を長文と数えず、推論トークンを出力へ再加算しません。待機候補の費用は確定削減額ではありません。ClaudeのTTLはCodexに適用しません。
+
+旧形式で親の履歴が混在する子スレッドは、使用量の所有者を特定できないため換算・集計から除外し、除外件数を表示します。子自身の使用量が残らない場合もあり、完全取得とは扱いません。
+
+Codex参考額は[OpenAI標準API単価](https://developers.openai.com/api/docs/pricing)による仮定の換算です（2026-10-06確認）。GPT-6 Astra / GPT-6.1 Sol / GPT-6 Lunaの標準・長文単価を同梱。速度未記録は標準速度と仮定し、未知モデル・非標準速度・キャッシュ内訳欠損は未換算。ChatGPT/Codex契約の請求額やクレジット消費量とは一致しません。
 
 ## 利用者ごとに問題候補を探す
 

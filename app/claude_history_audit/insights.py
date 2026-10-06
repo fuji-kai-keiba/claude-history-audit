@@ -82,6 +82,8 @@ def matched_resume(events, prices, ttl):
     """Match execution/model and similar context; this still cannot prove expiry."""
     strata = defaultdict(lambda: {'warm': [], 'cold': []})
     for e in events:
+        if e['r'].get('provider','claude') != 'claude':
+            continue
         if e['model_change'] or e['after_compaction']:
             continue
         side = 'warm' if e['gap'] <= 300 else 'cold' if (
@@ -153,6 +155,8 @@ def analyze(report, deep, prices, by_session, compactions, ambiguous_ids, writes
 
     for ttl in ('1h', '5m'):
         comparison, cold = matched_resume(events, prices, ttl)
+        if not any(r.get('provider','claude') == 'claude' for r in report['requests']):
+            comparison.update(status='not_applicable',reason='provider_not_applicable')
         comparisons.append(comparison)
         detectors.append({'code': 'resume_' + ttl, 'status': comparison['status']})
         if comparison['status'] == 'association':
@@ -164,6 +168,18 @@ def analyze(report, deep, prices, by_session, compactions, ambiguous_ids, writes
                 ['入力の前半やツール定義の変更', '並列処理や記録時刻と実リクエスト開始時刻の差', '同じ実行内での作業内容の変化'],
                 '対象の長い作業では、休憩前に決定事項・根拠の場所・未完了事項を短い引継メモに保存する。再開時は新しい会話にそのメモと必要な資料だけを渡す方法を試す。休憩後の全文圧縮にも全文処理が必要になり得るため、その費用も含める。',
                 c['examples'], confidence='medium')
+
+    polling = [r for r in report['requests'] if r.get('provider') == 'codex' and r.get('polling') and r['id'] not in ambiguous_ids]
+    detectors.append({'code':'polling','status':'detected' if len(polling)>=3 else 'not_detected','responses':len(polling)})
+    if len(polling)>=3:
+        examples = sorted(polling,key=context,reverse=True)[:2]
+        add('polling','待機・進捗確認の反復',polling,'total',
+            f"待機系だけの呼出を伴うCodex応答が{len(polling)}件。入力中央値{percentile([context(r) for r in polling],.5):,} tokens。",
+            '長い文脈で監視を繰り返している可能性。必要な待機も含むため無駄や削減額を確定しない。',
+            ['完了・失敗・ユーザー入力を速やかに確認するために必要','前の結果を判断する推論も同じ応答に含まれる'],
+            '待機・監視をシェル等の軽い処理へ寄せ、完了・失敗・進捗変化時にモデルへ戻す方式を比較する。応答性と完了条件を保つ。',
+            [e for r in examples for e in r.get('polling_evidence',[])+[r['evidence']]],confidence='medium')
+        findings[-1]['impact']['measurement']='responses_issuing_poll_only_calls_not_incremental_cost'
 
     # Persistent context is a concrete treatment candidate, never a finding of waste.
     context_count = 0

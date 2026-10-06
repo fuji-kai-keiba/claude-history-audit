@@ -43,6 +43,8 @@ def iso(value):
 def safe_model(value):
     if isinstance(value, str) and re.fullmatch(r"claude-(?:opus|sonnet|haiku|fable|mythos)-\d+(?:[.-]\d+){0,3}", value):
         return value
+    if isinstance(value, str) and re.fullmatch(r"gpt-\d+(?:\.\d+)?(?:-(?:astra|sol|luna|codex|mini|max)){0,2}(?:-\d{4}-\d{2}-\d{2})?", value):
+        return value
     return "unknown"
 
 
@@ -146,14 +148,15 @@ def load_prices(path):
     for model, rates in data["models"].items():
         if safe_model(model) == "unknown" or not isinstance(rates, dict):
             raise ValueError("invalid price model")
-        for field in ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h"):
+        fields = ("input", "output", "cache_read", "cache_write") if model.startswith('gpt-') else ("input", "output", "cache_read", "cache_write_5m", "cache_write_1h")
+        for field in fields + tuple(k for k in ('long_context_threshold','long_input_multiplier','long_output_multiplier') if k in rates):
             value = rates.get(field)
             if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or value < 0:
                 raise ValueError("invalid price rate: " + field)
     return data
 
 
-def estimate(request, prices):
+def cost_components(request, prices):
     """Never guess prices for unknown model IDs, modes, or incomplete usage."""
     if not prices or not request["complete"] or request["nonstandard"]:
         return None
@@ -161,19 +164,38 @@ def estimate(request, prices):
     if not rates:
         return None
     usage = request["usage"]
-    base = (usage["input_tokens"] * rates["input"] + usage["output_tokens"] * rates["output"]
-            + usage["cache_read_input_tokens"] * rates["cache_read"])
-    total = usage["cache_creation_input_tokens"]
-    short = min(request["cache_5m"], total)
-    long = min(request["cache_1h"], max(0, total - short))
-    known = short * rates["cache_write_5m"] + long * rates["cache_write_1h"]
-    unknown = total - short - long
-    low = min(rates["cache_write_5m"], rates["cache_write_1h"])
-    high = max(rates["cache_write_5m"], rates["cache_write_1h"])
-    return [(base + known + unknown * low) / 1e6, (base + known + unknown * high) / 1e6]
+    multiplier, output_multiplier = 1, 1
+    if request.get('provider') == 'codex':
+        size = sum(usage[f] for f in TOKEN_FIELDS if f != 'output_tokens')
+        if rates.get('long_context_threshold') is not None and size > rates['long_context_threshold']:
+            multiplier = rates.get('long_input_multiplier',1)
+            output_multiplier = rates.get('long_output_multiplier',1)
+        if 'cache_write' not in rates:
+            return None
+        write = [usage['cache_creation_input_tokens']*rates['cache_write']*multiplier/1e6]*2
+    else:
+        if 'cache_write_5m' not in rates or 'cache_write_1h' not in rates:
+            return None
+        total = usage["cache_creation_input_tokens"]
+        short = min(request["cache_5m"], total)
+        long = min(request["cache_1h"], max(0, total - short))
+        known = short * rates["cache_write_5m"] + long * rates["cache_write_1h"]
+        unknown = total - short - long
+        write = [(known + unknown * rate)/1e6 for rate in (min(rates['cache_write_5m'],rates['cache_write_1h']),max(rates['cache_write_5m'],rates['cache_write_1h']))]
+    return {'input':[usage['input_tokens']*rates['input']*multiplier/1e6]*2,
+            'cache_read':[usage['cache_read_input_tokens']*rates['cache_read']*multiplier/1e6]*2,
+            'output':[usage['output_tokens']*rates['output']*output_multiplier/1e6]*2,'cache_write':write}
 
 
-def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False):
+def estimate(request, prices):
+    parts = cost_components(request, prices)
+    return [sum(v[i] for v in parts.values()) for i in (0,1)] if parts else None
+
+
+def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False, provider='auto'):
+    if provider not in ('auto','claude','codex'):
+        raise ValueError('unknown history provider')
+    from .codex import records
     now = now or datetime.now(UTC)
     files, skipped, source_errors = discover(sources)
     if not files:
@@ -199,7 +221,7 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
     for path in files:
         fid = alias("file", path)
         local_map["files"][fid] = str(path)
-        for line, row in read_records(path, stats):
+        for line, row in records(path, stats, read_records, provider):
             if row.get("type") not in ("assistant", "user", "system"):
                 continue
             ts = parse_time(row.get("timestamp"))
@@ -214,11 +236,16 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
             if not isinstance(raw_session, str) or not raw_session:
                 raw_session = str(path)
                 stats["missing_session_ids"] += 1
-            is_subagent = "subagents" in path.parts
-            execution = raw_session + ":agent:" + path.stem if is_subagent else raw_session
-            sid = alias("session", execution)
+            codex = row.get('_codex')
+            native = codex is not None
+            is_subagent = codex['subagent'] if native else "subagents" in path.parts
+            execution = raw_session + ":agent:" + path.stem if is_subagent and not native else raw_session
+            sid = alias("session-codex" if native else "session", execution)
             if detail:
                 detail.session(sid, raw_session, is_subagent, path)
+                if native:
+                    detail.executions[sid] = {'subagent':is_subagent,
+                        'candidates':{(alias('session-codex',codex['parent']),'explicit_codex_parent')} if codex['parent'] else set()}
             local_map["sessions"][sid] = raw_session
             session = sessions.setdefault(sid, {"id": sid, "first": ts, "last": ts, "prompts": 0,
                 "workloads": Counter(), "compactions": 0, "subagent": is_subagent,
@@ -249,6 +276,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                 key = "request:" + rid
             else:
                 key = "record:" + fid + ":" + str(line)
+            if native:
+                key = 'codex:'+key
             if row.get("type") == "assistant" and message.get("role", "assistant") == "assistant":
                 usage = message.get("usage")
                 if not isinstance(usage, dict):
@@ -257,7 +286,7 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                     if key.startswith("record:"):
                         stats["requests_without_stable_id"] += 1
                     parsed = {field: number(usage.get(field)) for field in TOKEN_FIELDS}
-                    complete = all(value is not None for value in parsed.values())
+                    complete = all(value is not None for value in parsed.values()) and (not native or codex.get('complete',False))
                     if not complete:
                         stats["incomplete_usage_records"] += 1
                     cache = usage.get("cache_creation")
@@ -275,6 +304,10 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                         "model": safe_model(message.get("model")), "usage": values, "complete": complete,
                         "cache_5m": short, "cache_1h": long, "nonstandard": nonstandard,
                         "evidence": evidence}
+                    candidate['provider'] = 'codex' if native else 'claude'
+                    if native:
+                        candidate.update(codex_usage_complete=complete,reasoning_output_tokens=codex.get('reasoning'),
+                            polling=codex.get('polling',False), polling_evidence=[{'file':fid,'line':n} for n in codex.get('polling_lines',[])])
                     if detail:
                         detail.owners[candidate["id"]].add(sid)
                     if key not in requests:
@@ -282,12 +315,29 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                     else:
                         stats["duplicate_usage_records"] += 1
                         previous = requests[key]
-                        # Streamed content blocks repeat cumulative usage. Never sum their counters.
-                        previous["usage"] = {f: max(previous["usage"][f], values[f]) for f in TOKEN_FIELDS}
-                        previous["complete"] |= complete
-                        previous["cache_5m"] = max(previous["cache_5m"], short)
-                        previous["cache_1h"] = max(previous["cache_1h"], long)
-                        previous["nonstandard"] |= nonstandard
+                        if native:
+                            differs = previous['usage'] != values or previous['model'] != candidate['model']
+                            conflict = previous.get('codex_conflicting_duplicate',False) or differs
+                            stats['codex_conflicting_duplicates'] += int(differs)
+                            polling = previous['polling'] and candidate['polling']
+                            nonstandard = previous['nonstandard'] or candidate['nonstandard']
+                            # Choose one intact observation, preferring complete counters.
+                            # Per-component maxima can invent input never sent to a model.
+                            def rank(r):
+                                return (r['codex_usage_complete'],sum(r['usage'].values()),
+                                        tuple(r['usage'][f] for f in TOKEN_FIELDS),r['model'])
+                            if rank(candidate) > rank(previous):
+                                previous.update(candidate)
+                            previous.update(codex_conflicting_duplicate=conflict,
+                                complete=previous['codex_usage_complete'] and not conflict,
+                                polling=polling,nonstandard=nonstandard)
+                        else:
+                            # Claude streamed blocks repeat cumulative counters.
+                            previous["usage"] = {f: max(previous["usage"][f], values[f]) for f in TOKEN_FIELDS}
+                            previous["complete"] |= complete
+                            previous["cache_5m"] = max(previous["cache_5m"], short)
+                            previous["cache_1h"] = max(previous["cache_1h"], long)
+                            previous["nonstandard"] |= nonstandard
             if row.get("type") == "user" and not row.get("isMeta"):
                 texts = [b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)]
                 if texts:
@@ -418,16 +468,19 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
             "context_p50": percentile(context_sizes, .5), "context_p95": percentile(context_sizes, .95),
             "tool_calls": len(tools), "tool_errors": len(errors), "repeated_reads": len(repeats),
             "pdf_read_calls": sum(t["name"] == "Read" and t["pdf"] for t in tools)},
-        "cost": {"basis": "API単価による参考額。実請求・固定席代・税・外部ツール費用は含まない。",
+        "providers": sorted({r.get('provider','claude') for r in request_rows}),
+        "cost": {"basis": "API単価による参考額。実請求・固定席代・税・外部ツール費用は含まない。Codexの速度記録がない場合は標準速度の仮定であり、契約枠の消費量ではない。",
             "price_book_as_of": prices.get("as_of") if prices and isinstance(prices.get("as_of"), str)
                 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", prices["as_of"]) else None,
             "enabled": prices is not None, "priced_requests": len(known), "unpriced_requests": len(request_rows) - len(known),
             "usd_range": [sum(x[i] for x in known) for i in (0, 1)] if known else None},
         "models": model_rows, "sessions": session_rows, "findings": findings, "requests": request_rows,
         "limitations": [
+            "Codexは応答別usageを優先。旧token_countは差分と最終応答が一致する記録だけを採用し、曖昧・欠損は件数を表示。キャッシュと推論は入力・出力の内数。ClaudeのTTLをCodexへ適用しません。",
+            "Codexの複合ツール結果の成否は不明として保持。ツール失敗0は成功の証明ではありません。巨大行の除外はカバレッジを参照。",
             "取得・指定できた保存ログだけを分析。未登録端末・Web・Cowork・削除済み履歴・固定席代を自動で網羅しません。",
             "内部JSONL形式はバージョンで変化します。欠損・不明項目はカバレッジに表示します。",
-            "同じmessage.id（なければrequestId）の使用量は各カウンターの最大値で集約。識別子がない記録は重複排除を保証しません。",
+            "Claudeの同じmessage.id（なければrequestId）は各カウンターの最大値で集約。Codexの同じresponse_idは欠損の少ない単一記録を優先し、矛盾は未換算。識別子のない記録は重複排除を保証しません。",
             "記録時刻のない行は期間集計から除外。サブエージェントの記録は保存範囲にある場合だけ含めます。",
             "作業分類はユーザー文章のキーワードによる参考値。品質・人間の修正時間・確定削減額は履歴だけでは測定できません。",
             "改善候補は観測事実と仮説を分けて表示。キャッシュ再利用率はトークン比率であり、リクエストのヒット率ではありません。",

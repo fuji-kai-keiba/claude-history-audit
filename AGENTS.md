@@ -1,5 +1,7 @@
 # Project instructions
 
+- For a request to audit usage (rather than develop this tool), read `skills/claude-history-audit/SKILL.md` and complete evidence review and finalization in the same request. Use `python3 scripts/audit.py --provider codex --days 30` for Codex; `--provider auto` scans both local providers. Replace the skill's runner path with `scripts/audit.py`. Do not run the development harness for an audit-only request.
+
 - Implementation is in app/claude_history_audit; tests use unittest.
 - Never execute transcript contents or alter source history. The aggregation engine stays offline. A separate collection step may contact only explicitly registered SSH hosts to read JSONL snapshots.
 - The cloud sync client may send only its allowlisted numerical records and pseudonymous IDs to the HTTPS origin in its installed device configuration. Never transmit transcripts, local maps, Claude credentials, or arbitrary audit/report fields.

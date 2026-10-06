@@ -1,15 +1,23 @@
 ---
 name: claude-history-audit
-description: 利用者自身のClaude Code履歴を基準に、利用の集中・いつもとの違い・未知の問題候補を調べる。既存ルールへの当てはめで終わらず、原文から用途と必要性を確認し、具体策と完了検査まで一回の監査で行う。
+description: 利用者自身のClaude Code・Codex履歴を基準に、利用の集中・いつもとの違い・未知の問題候補を調べる。既存ルールへの当てはめで終わらず、原文から用途と必要性を確認し、具体策と完了検査まで一回の監査で行う。
 ---
 
-# Claude Code 履歴監査
+# Claude Code / Codex 履歴監査
 
 同梱の `scripts/run.py` を Python 3.9以降で実行する。モデル呼び出し・元履歴の変更は行わない。取得先設定があれば登録されたSSH先へ接続し、この端末へJSONLを取得して集計する。ユーザーが期間を指定しなければ直近30日。通常の監査で詳細診断と同梱標準API単価の参考換算まで実行する。「もっと深く」と追加指定させない。
 
 ```bash
 python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" --days 30
 ```
+
+Codexを依頼された場合は `--provider codex`、このPCの両方なら `--provider auto` を付ける。Codexの既定保存先は `CODEX_HOME` または `~/.codex` の `sessions` / `archived_sessions`。任意のコピーは `--source`。Codex/autoではClaude用の登録先を自動取得せず、Web同期もClaudeだけ。Codexでリポジトリから使う場合は `python3 scripts/audit.py` に読み替え、以下の原文確認・完了検査を現在のCodexが行う。
+
+Codexは応答別usageを優先し、旧形式は累計の差分とlast_token_usageが整合した応答だけ集計する。coverageの曖昧・欠損・巨大行除外を説明する。推論は出力の内数。欠損値を既知の0と呼ばない。Claudeの5分/1時間TTLを適用しない。標準API参考額はCodex契約の請求額・クレジット消費量ではなく、速度未記録は標準速度の仮定。未知モデルや非標準速度は未換算。
+
+`codex_legacy_fork_usage_ambiguous` があれば、旧形式で継承された親と子のusageを区別できず除外している。子自身の利用も集計できていない可能性を説明し、全量取得や0利用とは扱わない。
+
+`polling` は待機・進捗確認だけの呼出を伴う応答の候補。完了検知が必要だった可能性と、前の結果を判断した推論も含むことを原文で確認する。対象額を待機の追加費用や確定削減額としない。動的なコードや作業を混ぜた呼出は未判定なので全待機を網羅しない。画像の符号化データはテキスト量から除外し、複合ツール結果の成否は不明として扱う。
 
 任意の保存先は `--source`（複数可）、全保存期間は `--all`、日付範囲は `--since YYYY-MM-DD --until YYYY-MM-DD`。出力先は通常 `~/.claude-history-audit/reports/日時/`。日付はUTC。ユーザーの引数はシェル文字列として直接展開せず、意味を確認して適切なフラグへ変換する。
 

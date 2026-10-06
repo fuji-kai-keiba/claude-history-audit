@@ -106,7 +106,11 @@ def read_selected(files, refs):
                         continue
                     message = row.get('message') if isinstance(row.get('message'), dict) else row
                     # Select content rather than a giant serialized row whose usage could hide the text.
-                    text = json.dumps(message.get('content', ''), ensure_ascii=False)
+                    if row.get('type') in ('token_usage_record','event_msg','response_item','compacted'):
+                        from .codex import excerpt
+                        text = excerpt(row)
+                    else:
+                        text = json.dumps(message.get('content', ''), ensure_ascii=False)
                     timestamp = parse_time(row.get('timestamp'))
                     records[(fid, n)] = {'file': fid, 'line': n, 'sha256': hashlib.sha256(raw).hexdigest(),
                         'type': row.get('type') if row.get('type') in ('assistant','user','system') else 'unknown',

@@ -3,7 +3,7 @@ import json
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
 
-from .audit import TOKEN_FIELDS, parse_time, percentile, tool_name
+from .audit import TOKEN_FIELDS, parse_time, percentile, tool_name, cost_components
 
 INPUT_FIELDS = tuple(f for f in TOKEN_FIELDS if f != "output_tokens")
 RETRY_SECONDS = 300
@@ -17,16 +17,10 @@ def aggregate(requests, prices):
     known = [r for r in requests if r["cost_usd_range"] is not None]
     components = {k: [0., 0.] for k in ("input", "output", "cache_read", "cache_write")}
     for r in known:
-        rates, usage = prices["models"][r["model"]], r["usage"]
-        base = 0.
-        for key, field in (("input", "input_tokens"), ("output", "output_tokens"),
-                           ("cache_read", "cache_read_input_tokens")):
-            value = usage[field] * rates[key] / 1e6
-            base += value
+        parts = cost_components(r, prices)
+        for key, values in parts.items():
             for i in (0, 1):
-                components[key][i] += value
-        for i in (0, 1):
-            components["cache_write"][i] += max(0., r["cost_usd_range"][i] - base)
+                components[key][i] += values[i]
     reasons = Counter()
     for r in requests:
         if r["cost_usd_range"] is None:

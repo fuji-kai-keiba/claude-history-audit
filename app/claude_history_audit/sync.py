@@ -67,7 +67,7 @@ def payloads(config, sources=None, now=None):
                        skipped_symlinks=skipped, tools=0, tool_errors=0, repeated_reads=0,
                        compactions=0, large_context=0)
     else:
-        report, _ = audit(sources, until=now, now=now, identity_key=bytes.fromhex(config['sync_salt']))
+        report, _ = audit(sources, until=now, now=now, identity_key=bytes.fromhex(config['sync_salt']), provider='claude')
         records = []
         for r in report['requests']:
             u = r['usage']

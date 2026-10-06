@@ -82,7 +82,7 @@ def write_breakdown(report, prices, by_session, compactions, ambiguous_ids):
 def diagnose(report, deep, prices, by_session, compactions, ambiguous_ids):
     requests = report['requests']
     unpriced = [r for r in requests if r['cost_usd_range'] is None]
-    ttl_unknown = [r for r in requests if r['usage']['cache_creation_input_tokens'] > r['cache_5m'] + r['cache_1h']]
+    ttl_unknown = [r for r in requests if r.get('provider','claude') == 'claude' and r['usage']['cache_creation_input_tokens'] > r['cache_5m'] + r['cache_1h']]
     coverage = {
         'unpriced_requests': len(unpriced),
         'unpriced_tokens': {field:sum(r['usage'][field] for r in unpriced) for field in TOKEN_FIELDS},

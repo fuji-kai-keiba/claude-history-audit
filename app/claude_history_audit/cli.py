@@ -39,7 +39,8 @@ def main(argv=None):
     if argv and argv[0] == "review":
         from .evidence import main as review_main
         return review_main(argv[1:])
-    parser = argparse.ArgumentParser(description="Claude Code履歴を監査。登録済みSSH先は自動取得。履歴変更・LLM呼び出しなし。")
+    parser = argparse.ArgumentParser(description="Claude Code / Codex履歴を監査。履歴変更・LLM呼び出しなし。")
+    parser.add_argument('--provider', choices=('claude','codex','auto'), help='履歴形式と既定保存先。codexはCODEX_HOMEのsessions/archived_sessions。autoは両方。省略時の既定保存先はClaude、--sourceは自動判別')
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--source", action="append", type=Path, help="JSONLファイルまたはフォルダ。複数指定可。既定: CLAUDE_CONFIG_DIR/projects または ~/.claude/projects")
     window = parser.add_mutually_exclusive_group()
@@ -68,12 +69,16 @@ def main(argv=None):
         parser.error("--days は1以上にしてください。")
     if (args.source and (args.sources_config or args.local_only)) or (args.local_only and args.sources_config):
         parser.error("--source、--sources-config、--local-only は併用できません。")
+    if args.sources_config and args.provider in ('codex','auto'):
+        parser.error('登録先の自動取得はClaude用です。Codexは --source で保存先を指定してください。')
     now = datetime.now(timezone.utc)
     until = args.until + timedelta(days=1) if args.until else args.until_at or now
     since = None if args.all else args.since or args.since_at or until - timedelta(days=args.days if args.days is not None else 30)
     if since and since >= until:
         parser.error("開始日は終了日より前にしてください。")
-    sources = args.source or [local_source()]
+    from .codex import local_sources as codex_sources
+    defaults = codex_sources() if args.provider == 'codex' else ([local_source()]+codex_sources() if args.provider == 'auto' else [local_source()])
+    sources = args.source or defaults
     output = args.output or Path.home() / ".claude-history-audit" / "reports" / now.strftime("%Y%m%dT%H%M%S%fZ")
     status, private = {"mode": "paths"}, {}
     try:
@@ -82,7 +87,7 @@ def main(argv=None):
             raise ValueError("出力先は新しいフォルダを指定してください。")
         prices = load_prices(None if args.no_prices else args.price_book or Path(__file__).with_name("reference_prices.json"))
         registry_path = (args.sources_config or default_config()).expanduser()
-        if not args.source and not args.local_only and (args.sources_config or registry_path.exists()):
+        if not args.source and not args.local_only and args.provider not in ('codex','auto') and (args.sources_config or registry_path.exists()):
             config = read_config(registry_path)
             snapshot = state_home() / "collections" / now.strftime("%Y%m%dT%H%M%S%fZ")
             local_paths = ([local_source()] if config.get("include_local", True) else []) + [Path(s["path"]).expanduser() for s in config["sources"] if s["kind"] == "path"]
@@ -103,7 +108,7 @@ def main(argv=None):
             src = source.expanduser().resolve()
             if dest == src or src in dest.parents:
                 raise ValueError("履歴の保存先の中へレポートは書き込みません。別の --output を指定してください。")
-        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep)
+        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep, provider=args.provider or 'auto')
         report["collection"] = status
         local_map["collection_sources"] = private
         destination = write_reports(output, report, local_map)
