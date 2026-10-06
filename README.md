@@ -86,6 +86,23 @@ python3 scripts/audit.py --deep --reference-prices --since-at 2026-09-06T00:00:0
 
 `--since-at` は開始を含み、`--until-at` は終了を含みません。時差を必ず指定します。日付版の `--until`（指定日を含む）とは意味が違います。重複除外やセッション定義も比較してください。
 
+## 日別・週別・月別の利用量をすぐ見る
+
+レポートを作らず、ターミナルに表で出します（ccusage の daily/weekly/monthly 相当）。この環境の保存履歴（または `--source`）だけを読み、ファイルは書かず、登録済みSSH先にも接続しません。
+
+```bash
+python3 scripts/audit.py usage daily                    # 直近30日・日別
+python3 scripts/audit.py usage weekly --since 2026-09-01
+python3 scripts/audit.py usage monthly --all
+python3 scripts/audit.py usage daily --days 7 --breakdown  # 期間ごとにモデル別の行
+python3 scripts/audit.py usage daily --provider auto       # Claude と Codex の両方
+python3 scripts/audit.py usage daily --json               # 機械処理用
+```
+
+日付の区切りは既定でOSの時刻設定（`local`）。`--timezone UTC`、`+09:00`、`Asia/Tokyo` も指定できます（地域名はOSのタイムゾーンデータか tzdata が必要。時差の数値指定は追加パッケージ不要）。`usage` の `--since`/`--until` はこの暦の日付です。週は月曜始まり。参考額は既定で同梱の標準API単価表による換算（`--price-book` で差し替え、`--no-prices` で非表示）で、単価のないモデルは「未換算」として件数を出します。
+
+通常の監査レポート（report.json の `periods`・summary.md・HTML）にも同じ期間別の表を出します。区切りは `--timezone`（既定 local）ですが、監査の `--since`/`--until` は従来どおりUTCです。
+
 ## なぜトークンがかかるかを分解する
 
 通常実行（詳細監査）で、Claude の要求を実行ごとに並べ直し、費用の仕組みを分解した節「なぜトークンがかかるか」を出します（`report.json` の `anatomy`）。

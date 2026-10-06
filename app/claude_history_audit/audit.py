@@ -192,7 +192,7 @@ def estimate(request, prices):
     return [sum(v[i] for v in parts.values()) for i in (0,1)] if parts else None
 
 
-def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False, provider='auto', config_dir=None):
+def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False, provider='auto', config_dir=None, zone=None):
     if provider not in ('auto','claude','codex'):
         raise ValueError('unknown history provider')
     from .codex import records
@@ -388,6 +388,7 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                         errors.append(evidence)
     if not stats["records_in_window"]:
         raise ValueError("指定期間に時刻付きのセッション記録がありません。--all または --source を確認してください。")
+    from .periods import Zone, all_periods
     request_rows = sorted(requests.values(), key=lambda r: (parse_time(r["timestamp"]), r["id"]))
     for request in request_rows:
         request["cost_usd_range"] = estimate(request, prices)
@@ -480,6 +481,7 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                 and re.fullmatch(r"\d{4}-\d{2}-\d{2}", prices["as_of"]) else None,
             "enabled": prices is not None, "priced_requests": len(known), "unpriced_requests": len(request_rows) - len(known),
             "usd_range": [sum(x[i] for x in known) for i in (0, 1)] if known else None},
+        "periods": all_periods(request_rows, zone or Zone()),
         "models": model_rows, "sessions": session_rows, "findings": findings, "requests": request_rows,
         "limitations": [
             "Codexは応答別usageを優先。旧token_countは差分と最終応答が一致する記録だけを採用し、曖昧・欠損は件数を表示。キャッシュと推論は入力・出力の内数。ClaudeのTTLをCodexへ適用しません。",
