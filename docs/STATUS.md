@@ -1,44 +1,49 @@
 # Status
 
-2026-10-05: Web画面へ数値のみを同期する端末ツールを追加。最終検証・独立レビューは末尾のHarness欄を参照。
+2026-10-06: ローカルの `--deep` 監査を追加。独立レビュー・最終検証は下のHarness欄と検証結果を参照。
 
-- ローカル集計・SSH/共有フォルダ取得は既存機能として維持。
-- cloud sync/status、独立Python zipアプリ、HTTPS限定転送、許可リスト、安定HMAC ID、分割同期、成功確認に対応。
-- Windowsは現在のユーザーがログイン中に15分ごとのタスクを登録。パスは引用し、接続鍵をコマンドラインに含めない。Mac/Linux/WSLは手動sync。
-- 全50件のunittest、独立スキル導入・CLIレポート・配布zipアプリのスモークテスト成功。配布pyzを独立プロセスでinstallし、実HTTPSで501件を2分割送信、認証ヘッダー、本文除外、受信完了と状態保存まで検証（合成履歴・一時CAを使用、TLS検証は有効）。Windowsタスク登録はモックでコマンドと失敗処理を検証。
-- 実Windows端末は未接続。本人のログイン、実PCへのインストールと定期実行は未検証。Web側の複数利用者・端末の結合検証は別案件で実施。
-- 元履歴・監査結果・接続設定・接続鍵はGitへ保存しない。
-- GitHub: https://github.com/fuji-kai-keiba/claude-history-audit （private）
-- Web: https://github.com/fuji-kai-keiba/claude-history-audit-web （別案件、非公開サイト）
+- 親/子の内訳と推定親子合算、全応答の文脈推移、ツール結果の保存テキスト量、同一引数の失敗後再試行、圧縮前後を根拠行付きで表示。
+- 通常集計の重複排除後の応答を使用。時刻が同じ場合や使用量欠損では文脈差を確定せず、再試行区間の重複を除いた観測量を別に集計。失敗が原因の費用や確定削減額とは表示しない。
+- `--reference-prices` の明示指定でOpus 5等の2026-10-06確認の標準API単価を使用。基準日・未換算を表示。`--since-at`/`--until-at` により時差付きの正確な期間指定が可能。
+- 深掘りはローカルHTML/JSON/Markdownのみ。既存のクラウド許可リストや公開済みWeb・配布済み端末エージェントへ詳細を追加していない。
+- 原文・コマンド・パスは集計に出さず、根拠の対応は私的なlocal-map.json。価格や使用量を請求書と呼ばない。
 
 ## 起動
 
-ローカル監査: `python3 scripts/audit.py --days 30 --open`
+`python3 scripts/audit.py --days 30 --deep --reference-prices --open`
 
-SSH登録: `python3 scripts/audit.py sources add-ssh work user@server`
+Windowsでは `py -3 scripts/audit.py --days 30 --deep --reference-prices --open`。
 
-スキル: `python3 scripts/install_skill.py` → Claude Codeで `/claude-history-audit`
+個人Claudeスキル: `python3 scripts/install_skill.py` → `/claude-history-audit このPCの履歴を深く監査`。既存スキルは退避して再導入。
 
-Web同期: Webから各PC専用ZIPを取得し、Windowsは `install-windows.cmd`。その他は `python3 audit-agent.pyz install --config device.json`、更新は `sync`。
+期間比較例: `--since-at 2026-09-06T00:00:00+09:00 --until-at 2026-10-06T00:00:00+09:00`（終了は含まない）。
 
 ## 検証
 
-`python3 -m unittest discover -s tests -v`
+- unittest 69件成功（最終再検証はHarness欄）。合成データで重複、親子、曖昧な時刻、再試行区間の重複、結果量、圧縮、未知価格、本文除外、正確な日付境界を検証。
+- 独立スキル導入→同梱単価→深掘りレポートのスモーク成功。既存pyzの実HTTPS同期501件/2分割・認証・本文除外も成功。
+- 5万5千応答/550実行の合成負荷確認: このMacで集計約1.7秒、レポート出力までの最大RSS約630MiB、JSON約63.8MiB。親子全グループの合計と通常集計が一致。環境・結果数により変わる。大規模JSONをモデルへ丸ごと投入しない。
+- HTML構造、グラフ10本と詳細表の生成、外部アセットなしを確認。接続可能なBrowserがないためブラウザでの見た目・操作は未確認。
+- 独立レビュー初回で同時刻の再試行判定と最大結果サイズの根拠行に指摘。修正し、異なるHMAC鍵12通りで判定不変・根拠行/時刻の一致の回帰検証を追加。
+- ユーザーが提示した別Windows PCの約5万件の実ログは、このMacから未取得。提示された数値を再監査した結果とは扱わない。
 
-`python3 scripts/smoke_test.py`
+## 既存機能・制約
 
-## 制約・次の作業
+SSH/共有フォルダ取得と、Webへの数値同期を維持。WebのWindowsエージェントはログイン中に15分ごとに同期。Mac/Linux/WSLは手動。実Windowsへの初回導入・定期実行は未検証。既存の公開状況は各リポジトリで管理。
 
-未登録端末、削除済み履歴、公式組織APIコネクター、請求との自動突合は対象外。Webに受信済みの使用量は端末側の履歴削除後も保持。現版は同期ごとに端末の保存履歴全体を処理する。大規模利用での負荷測定・差分同期は今後の拡張。
+- GitHub: https://github.com/fuji-kai-keiba/claude-history-audit （private）
+- Web: https://github.com/fuji-kai-keiba/claude-history-audit-web （別案件）
 
-本人が各PCで一度設定し、実Windowsで最終同期と定期更新を確認する。WSLとWindowsの履歴保存先は別。SSHの実接続とClaudeモデルによるスキル呼び出しも未実施。
+未登録端末、削除済み履歴、Enterprise API接続、請求との自動突合、変更した引数での再試行検出、成果物品質の自動判定は対象外。Web同期は端末全履歴を毎回集計。差分同期・大量結果のストリーミング出力は今後の拡張。
+
+次は実際に履歴があるWindowsで新しいCLI/スキルを実行し、上位作業の根拠だけを確認して改善実験へつなぐ。
 
 <!-- harness:start -->
 ## Harness
 
-- Task: 9e1a6e053c5a / Web監査用の数値同期とWindows自動実行
+- Task: 7221e7f89d73 / 履歴監査を文脈推移・再試行・親子集計まで深掘り
 - 状態: done
 - 次の作業: 完了。変更が生じた場合は再検証する
 - 試行: 0/3
-- 記録: .harness/9e1a6e053c5a/task.json
+- 記録: .harness/7221e7f89d73/task.json
 <!-- harness:end -->

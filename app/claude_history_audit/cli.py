@@ -19,6 +19,16 @@ def calendar_date(text):
         raise argparse.ArgumentTypeError("日付は YYYY-MM-DD（UTC）で指定してください。")
 
 
+def instant(text):
+    try:
+        result = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if result.tzinfo is None:
+            raise ValueError("timezone required")
+        return result.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        raise argparse.ArgumentTypeError("時刻は 2026-09-06T00:00:00+09:00 のようにUTCオフセット付きで指定してください。")
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv and argv[0] == "sources":
@@ -32,10 +42,16 @@ def main(argv=None):
     window = parser.add_mutually_exclusive_group()
     window.add_argument("--days", type=int, help="直近N日（既定30）。--until があればその日の終了から遡る")
     window.add_argument("--since", type=calendar_date, help="開始日を含む（UTC）")
+    window.add_argument("--since-at", type=instant, help="開始時刻を含む。ISO 8601、UTCオフセット必須")
     window.add_argument("--all", action="store_true", help="残っている全期間を対象にする")
-    parser.add_argument("--until", type=calendar_date, help="終了日を含む（UTC）")
+    end = parser.add_mutually_exclusive_group()
+    end.add_argument("--until", type=calendar_date, help="終了日を含む（UTC）")
+    end.add_argument("--until-at", type=instant, help="終了時刻は含まない。ISO 8601、UTCオフセット必須")
     parser.add_argument("--output", type=Path, help="新しい出力フォルダ。既定: ~/.claude-history-audit/reports/日時")
-    parser.add_argument("--price-book", type=Path, help="明示指定したAPI単価表で参考額を計算。請求額ではありません")
+    price = parser.add_mutually_exclusive_group()
+    price.add_argument("--price-book", type=Path, help="明示指定したAPI単価表で参考額を計算。請求額ではありません")
+    price.add_argument("--reference-prices", action="store_true", help="同梱の標準API参考単価表を使用。実請求ではありません")
+    parser.add_argument("--deep", action="store_true", help="文脈推移・親子実行・再試行・ツール結果量・圧縮前後を追加監査")
     parser.add_argument("--open", action="store_true", help="作成後、ローカルHTMLをブラウザで開く")
     parser.add_argument("--sources-config", type=Path, help="取得先設定。省略時は ~/.claude-history-audit/sources.json があれば使用")
     parser.add_argument("--local-only", action="store_true", help="登録先に接続せず、この環境の既定の履歴だけを監査")
@@ -46,8 +62,8 @@ def main(argv=None):
     if (args.source and (args.sources_config or args.local_only)) or (args.local_only and args.sources_config):
         parser.error("--source、--sources-config、--local-only は併用できません。")
     now = datetime.now(timezone.utc)
-    until = args.until + timedelta(days=1) if args.until else now
-    since = None if args.all else args.since or until - timedelta(days=args.days if args.days is not None else 30)
+    until = args.until + timedelta(days=1) if args.until else args.until_at or now
+    since = None if args.all else args.since or args.since_at or until - timedelta(days=args.days if args.days is not None else 30)
     if since and since >= until:
         parser.error("開始日は終了日より前にしてください。")
     sources = args.source or [local_source()]
@@ -57,7 +73,7 @@ def main(argv=None):
         dest = output.expanduser().resolve()
         if dest.exists() or dest.is_symlink():
             raise ValueError("出力先は新しいフォルダを指定してください。")
-        prices = load_prices(args.price_book)
+        prices = load_prices(Path(__file__).with_name("reference_prices.json") if args.reference_prices else args.price_book)
         registry_path = (args.sources_config or default_config()).expanduser()
         if not args.source and not args.local_only and (args.sources_config or registry_path.exists()):
             config = read_config(registry_path)
@@ -80,7 +96,7 @@ def main(argv=None):
             src = source.expanduser().resolve()
             if dest == src or src in dest.parents:
                 raise ValueError("履歴の保存先の中へレポートは書き込みません。別の --output を指定してください。")
-        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now)
+        report, local_map = audit(sources, since=since, until=until, prices=prices, now=now, deep=args.deep)
         report["collection"] = status
         local_map["collection_sources"] = private
         destination = write_reports(output, report, local_map)

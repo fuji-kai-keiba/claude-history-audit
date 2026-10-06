@@ -25,13 +25,16 @@ def main():
         subprocess.run([sys.executable, str(ROOT / "scripts" / "install_skill.py"), "--destination", str(folder / "skill")], check=True, capture_output=True)
         runner = folder / "skill" / "scripts" / "run.py"
         subprocess.run([sys.executable, str(runner), "--source", str(source), "--all", "--output", str(folder / "report"),
-                        "--price-book", str(ROOT / "docs" / "prices.example.json")], check=True, capture_output=True, cwd=str(folder))
+                        "--deep", "--reference-prices"], check=True, capture_output=True, cwd=str(folder))
         for name in ("report.json", "summary.md", "report.html", "local-map.json"):
             assert (folder / "report" / name).is_file(), name
         r = json.loads((folder / "report" / "report.json").read_text())
         assert r["coverage"]["unique_requests"] == 1
         assert r["cost"]["priced_requests"] == 1
         assert r["totals"]["output_tokens"] == 10
+        assert r["deep"]["summary"]["requests"] == 1
+        assert r["deep"]["summary"]["priced_requests"] == 1
+        assert r["deep"]["executions"][0]["trajectory"][0]["context_tokens"] == 800
         for name in ("report.json", "summary.md", "report.html"):
             assert "SYNTHETIC_PRIVATE_TEXT" not in (folder / "report" / name).read_text()
         assert hashlib.sha256(source.read_bytes()).hexdigest() == before

@@ -173,7 +173,7 @@ def estimate(request, prices):
     return [(base + known + unknown * low) / 1e6, (base + known + unknown * high) / 1e6]
 
 
-def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None):
+def audit(sources, since=None, until=None, prices=None, now=None, identity_key=None, deep=False):
     now = now or datetime.now(UTC)
     files, skipped, source_errors = discover(sources)
     if not files:
@@ -184,6 +184,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
     def alias(kind, raw):
         digest = hmac.new(salt, str(raw).encode(), hashlib.sha256).hexdigest()
         return kind + "-" + (digest if identity_key else digest[:12])
+    from .deep import DeepAudit
+    detail = DeepAudit(alias) if deep else None
     stats = Counter(files_found=len(files), skipped_symlinks=skipped, source_errors=source_errors)
     requests = {}
     sessions = {}
@@ -215,6 +217,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
             is_subagent = "subagents" in path.parts
             execution = raw_session + ":agent:" + path.stem if is_subagent else raw_session
             sid = alias("session", execution)
+            if detail:
+                detail.session(sid, raw_session, is_subagent, path)
             local_map["sessions"][sid] = raw_session
             session = sessions.setdefault(sid, {"id": sid, "first": ts, "last": ts, "prompts": 0,
                 "workloads": Counter(), "compactions": 0, "subagent": is_subagent,
@@ -228,6 +232,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                 if ckey not in compaction_seen:
                     compaction_seen.add(ckey)
                     session["compactions"] += 1
+                    if detail:
+                        detail.compactions.append({"session": sid, "timestamp": iso(ts), "evidence": evidence})
             message = row.get("message")
             if not isinstance(message, dict):
                 continue
@@ -269,6 +275,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                         "model": safe_model(message.get("model")), "usage": values, "complete": complete,
                         "cache_5m": short, "cache_1h": long, "nonstandard": nonstandard,
                         "evidence": evidence}
+                    if detail:
+                        detail.owners[candidate["id"]].add(sid)
                     if key not in requests:
                         requests[key] = candidate
                     else:
@@ -311,7 +319,11 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                         "range": str((inputs.get("offset"), inputs.get("limit"), inputs.get("pages"))),
                         "timestamp": ts, "evidence": evidence,
                         "pdf": target.lower().endswith(".pdf")})
-                elif block.get("type") == "tool_result" and block.get("is_error") is True:
+                    if detail:
+                        detail.tool(tkey, block.get("name"), inputs, sid, iso(ts), evidence)
+                if block.get("type") == "tool_result" and detail:
+                    detail.result(block, sid, iso(ts), evidence)
+                if block.get("type") == "tool_result" and block.get("is_error") is True:
                     tid = block.get("tool_use_id")
                     rkey = tid if isinstance(tid, str) and tid else fid + ":" + str(line) + ":" + str(index)
                     if rkey not in result_seen:
@@ -320,7 +332,7 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
                         errors.append(evidence)
     if not stats["records_in_window"]:
         raise ValueError("指定期間に時刻付きのセッション記録がありません。--all または --source を確認してください。")
-    request_rows = sorted(requests.values(), key=lambda r: (r["timestamp"], r["id"]))
+    request_rows = sorted(requests.values(), key=lambda r: (parse_time(r["timestamp"]), r["id"]))
     for request in request_rows:
         request["cost_usd_range"] = estimate(request, prices)
     totals = {field: sum(r["usage"][field] for r in request_rows) for field in TOKEN_FIELDS}
@@ -350,8 +362,11 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
             "priced_requests": len(known),
             "cost_usd_range": [sum(x[i] for x in known) for i in (0, 1)] if known else None})
     session_rows = []
+    by_session = defaultdict(list)
+    for request in request_rows:
+        by_session[request["session"]].append(request)
     for sid, session in sessions.items():
-        subset = [r for r in request_rows if r["session"] == sid]
+        subset = by_session[sid]
         labels = session["workloads"]
         session_rows.append({"id": sid, "first": iso(session["first"]), "last": iso(session["last"]),
             "requests": len(subset), "prompts": session["prompts"], "subagent": session["subagent"],
@@ -404,6 +419,8 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
             "tool_calls": len(tools), "tool_errors": len(errors), "repeated_reads": len(repeats),
             "pdf_read_calls": sum(t["name"] == "Read" and t["pdf"] for t in tools)},
         "cost": {"basis": "API単価による参考額。実請求・固定席代・税・外部ツール費用は含まない。",
+            "price_book_as_of": prices.get("as_of") if prices and isinstance(prices.get("as_of"), str)
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", prices["as_of"]) else None,
             "enabled": prices is not None, "priced_requests": len(known), "unpriced_requests": len(request_rows) - len(known),
             "usd_range": [sum(x[i] for x in known) for i in (0, 1)] if known else None},
         "models": model_rows, "sessions": session_rows, "findings": findings, "requests": request_rows,
@@ -415,4 +432,6 @@ def audit(sources, since=None, until=None, prices=None, now=None, identity_key=N
             "作業分類はユーザー文章のキーワードによる参考値。品質・人間の修正時間・確定削減額は履歴だけでは測定できません。",
             "改善候補は観測事実と仮説を分けて表示。キャッシュ再利用率はトークン比率であり、リクエストのヒット率ではありません。",
         ]}
+    if detail:
+        report["deep"] = detail.build(report, prices, by_session)
     return report, local_map
