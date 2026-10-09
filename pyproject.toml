@@ -5,9 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-history-audit"
 version = "0.1.0"
-description = "Offline, evidence-based auditing of retained Claude Code transcripts"
+description = "Local-first, evidence-based auditing of Claude Code and Codex history"
+readme = "README.md"
+license = {file = "LICENSE"}
 requires-python = ">=3.9"
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/fuji-kai-keiba/claude-history-audit"
+Issues = "https://github.com/fuji-kai-keiba/claude-history-audit/issues"
+Documentation = "https://github.com/fuji-kai-keiba/claude-history-audit#readme"
 
 [project.scripts]
 claude-history-audit = "claude_history_audit.cli:main"

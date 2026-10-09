@@ -1,12 +1,36 @@
 # Claude History Audit
 
+[![Tests](https://github.com/fuji-kai-keiba/claude-history-audit/actions/workflows/test.yml/badge.svg)](https://github.com/fuji-kai-keiba/claude-history-audit/actions/workflows/test.yml)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
+Local-first usage auditing for Claude Code and Codex, with evidence-based diagnostics and Japanese HTML reports. Python 3.9+, no runtime dependencies.
+
 Claude Code・Codexの**利用者自身の保存履歴を基準に、問題候補の探索・原文確認・具体的な改善策まで一回の監査で行う**ツールです。特定の利用者の通常値を他の人へ当てはめず、Claudeは登録したPC・サーバーからの自動取得にも対応します。
 
-会話を外部AIへ送らず、Python標準ライブラリだけでJSONLを集計します。ブラウザで見られる日本語HTML、機械処理用JSON、短いMarkdown要約を出力します。Claude Code用の `/claude-history-audit` スキルも同梱しています。
+集計CLIは外部AIを呼ばず、Python標準ライブラリだけでJSONLを処理します。ブラウザで見られる日本語HTML、機械処理用JSON、短いMarkdown要約を出力します。Claude Code用の `/claude-history-audit` スキルも同梱しています。**Claude CodeやCodexに原文確認を任せると、選んだ抜粋はそのAIセッションの入力になります。** 通信する場面と共有時の注意は [SECURITY.md](SECURITY.md) を参照してください。
+
+Anthropic・OpenAIとは独立した非公式のコミュニティプロジェクトです。両社による提供・承認を示すものではありません。
+
+## できることと対応範囲
+
+| 用途 | 内容 |
+|---|---|
+| 利用量の確認 | モデル別・日別・週別・月別のトークン数、キャッシュ、標準API単価での参考換算 |
+| 改善候補の探索 | 本人の通常値との比較、文脈増加、再試行、圧縮、待機の反復を根拠付きで表示 |
+| 原文に基づく確認 | Claude Code / Codexが限定した抜粋を読み、作業の必要性と改善実験を整理 |
+| ローカルレポート | 外部アセット不要の日本語HTML・JSON・Markdown。Webサービスの登録は不要 |
+| 複数端末 | Claudeの履歴を登録済みSSH先・共有フォルダから取得。Web同期は別途設定したClaude端末のみ |
+
+Python 3.9以降で動作し、実行時の追加パッケージは不要です。CIはLinuxのPython 3.9 / 3.13、ローカル検証はmacOSで行っています。Windows向けの実行手順もありますが、権限・シンボリックリンクに関する既存テストの失敗と、端末エージェント導入の未検証部分があります。詳細は [開発状態](docs/STATUS.md) を参照してください。
+
+**記録に残った範囲を調べるツールです。** 削除済み履歴・未登録端末の自動取得、アカウント全体の完全取得、請求額の確定、削減効果や成果物品質の保証は行いません。内部JSONL形式の変更により取り込めない場合があります。
+
+[クイックスタート](#最短で使う) · [Codex](#codexを監査する) · [期間別集計](#日別週別月別の利用量をすぐ見る) · [集計ルール](docs/METHODOLOGY.md) · [貢献方法](CONTRIBUTING.md) · [セキュリティ](SECURITY.md) · [ライセンス](LICENSE)
 
 ## 最短で使う
 
-Python 3.9以降。追加パッケージ・APIキーは不要です。
+Python 3.9以降。集計CLIには追加パッケージ・APIキーは不要です。AIによる原文確認には、利用するClaude Code / Codexの環境と契約が必要です。
 
 **Claude Codeでこのリポジトリを開き「このPCの直近30日を監査して、改善策まで出して」と依頼できます。** `CLAUDE.md` が一連の手順へ案内するため、リポジトリ内で使う場合はスキルの別途インストールも不要です。Claudeが原文確認と完了検査まで進めます。
 
@@ -15,6 +39,8 @@ git clone https://github.com/fuji-kai-keiba/claude-history-audit.git
 cd claude-history-audit
 python3 scripts/audit.py --days 30 --open
 ```
+
+Windowsでは最後の行を `py -3 scripts/audit.py --days 30 --open` に読み替えてください。集計だけをローカルで行う場合は、このコマンドをターミナルで実行します。登録済みSSH先からの取得も止めるには `--local-only` を付けます。
 
 取得先を未登録の場合は `CLAUDE_CONFIG_DIR/projects`、未設定なら `~/.claude/projects` の保存履歴だけを読みます。**同じアカウントでも、この実行環境だけの履歴がアカウント全体を表すわけではありません。** 別端末のコピーや独自の保存先にも対応します。
 
@@ -155,7 +181,7 @@ Enterpriseも履歴が端末にしかない、という説明は正しくあり�
 
 ## どのPCからもWebで確認する
 
-別リポジトリ [claude-history-audit-web](https://github.com/fuji-kai-keiba/claude-history-audit-web) の非公開Web画面を利用します。WebへのログインはChatGPTアカウントです。Claudeのログインや契約とは別で、Claudeの認証情報は取得しません。
+この機能は、別管理の `claude-history-audit-web` と、そのWeb画面から発行する端末設定を持つ利用者向けです。**この公開リポジトリだけで利用できる一般公開Webサービスは提供していません。** ローカル監査にはWeb側へのアクセスは不要です。WebへのログインはChatGPTアカウントで、Claudeのログインや契約とは別です。Claudeの認証情報は取得しません。
 
 1. 利用しているPCでWeb画面にログインし、「PCを追加」から設定ZIPをダウンロードする。
 2. ZIPを展開する。WindowsはPython 3.9以降を用意し、`install-windows.cmd` を実行する。
@@ -264,3 +290,15 @@ python3 scripts/smoke_test.py
 合成データだけを使います。内部JSONL形式は変更されるため、新しいバージョンに対応するときは実ログを公開せず、匿名の合成回帰ケースを追加してください。
 
 詳しい集計ルールは [docs/METHODOLOGY.md](docs/METHODOLOGY.md)、開発状態は [docs/STATUS.md](docs/STATUS.md) を参照してください。
+
+## 不具合報告・機能提案・開発への参加
+
+[Issues](https://github.com/fuji-kai-keiba/claude-history-audit/issues) とPull Requestを受け付けています。日本語・英語どちらでも構いません。再現手順や開発時の確認事項は [CONTRIBUTING.md](CONTRIBUTING.md) にまとめています。
+
+実際の会話履歴、監査レポート、接続設定、認証情報は添付せず、架空のデータで再現してください。情報漏えいなどの脆弱性は公開Issueに書かず、[セキュリティポリシー](SECURITY.md) の非公開窓口へ報告してください。
+
+## ライセンス
+
+[MIT License](LICENSE)。著作権表示とライセンス本文を残すことを条件に、商用利用・改変・再配布ができます。ソフトウェアは無保証で提供されます。正確な条件はLICENSE本文を参照してください。
+
+このライセンスは本リポジトリのソフトウェアと付属文書に適用されます。利用者の会話履歴・生成した私的レポートの権利や、Claude Code / Codexなど外部サービスの利用条件を変更するものではありません。

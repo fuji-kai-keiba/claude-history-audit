@@ -20,6 +20,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix=".claude-audit-install-", dir=str(destination.parent)) as temp:
         staging = Path(temp) / "skill"
         shutil.copytree(root / "skills" / "claude-history-audit", staging)
+        shutil.copyfile(root / "LICENSE", staging / "LICENSE")
         scripts = staging / "scripts"
         scripts.mkdir()
         shutil.copytree(root / "app" / "claude_history_audit", scripts / "claude_history_audit",

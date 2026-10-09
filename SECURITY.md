@@ -1,0 +1,34 @@
+# Security policy
+
+## 脆弱性の報告 / Reporting a vulnerability
+
+履歴・認証情報の漏えい、意図しない外部通信、履歴内のデータによるコマンド実行、HTMLへのスクリプト混入などは、公開IssueやPull Requestに詳細を書かず、[GitHubの非公開脆弱性報告](https://github.com/fuji-kai-keiba/claude-history-audit/security/advisories/new) を利用してください。報告にはGitHubへのログインが必要です。
+
+Please report vulnerabilities privately using [GitHub private vulnerability reporting](https://github.com/fuji-kai-keiba/claude-history-audit/security/advisories/new). Reports in English or Japanese are welcome. Do not attach real transcripts, credentials, or private reports.
+
+報告には、影響するコミット・OS・Pythonバージョン、問題の概要、想定する影響、架空のデータを使った再現手順を含めてください。非公開窓口でも実際の会話本文・接続鍵・利用者情報は送らないでください。窓口が使えない場合は、詳細を含めず「非公開の連絡方法が必要」とだけIssueで知らせてください。
+
+修正対象は原則として `main` の最新コードです。古いコミットや派生版への修正提供は保証しません。対応期限や報奨金は設定していません。
+
+## データと通信の境界
+
+| 操作 | 扱うデータと通信 |
+|---|---|
+| ローカル集計 | 保存履歴を読み取り専用で処理。集計CLI自身はLLMを呼ばず、履歴を外部AIへ送信しない |
+| 原文確認CLI | `review evidence` は選んだ原文の抜粋を端末に出力する。抜粋には私的情報が含まれ得る |
+| Claude Code / Codexでの原文確認 | エージェントが抜粋を読むと、そのAIセッションの入力になる。利用中のサービスのデータ取扱条件が適用される |
+| SSH・共有フォルダ収集 | 明示的に登録した接続先から履歴を監査端末へコピーする。共有先がネットワーク上ならそのアクセスも発生する |
+| 任意のWeb同期 | 導入済み端末設定のHTTPS接続先へ、許可リストの使用量メタデータ・数値・仮名IDを送る。通常の監査だけでは起動しない |
+
+SSHは既知のホスト鍵を検証します。検証の無効化や、任意のURLへの履歴送信を前提としないでください。Web同期用の `device.json` と設定ZIPは接続鍵を含みます。
+
+## 共有しないファイル
+
+- 元のJSONL履歴、SSHから取得した `collections/` の内容。
+- `local-map.json`、`*.private.*`、`review-receipts.private/` などの根拠・レビュー記録。
+- `sources.json`、`device.json`、端末設定ZIP、SSH鍵、各サービスの認証ファイル。
+- 実際の監査レポートと、それを表示した画面のスクリーンショット。
+
+集計レポートは会話本文・元ID・実パスを除外しますが、日時、モデル、使用量やそれらの組み合わせから利用状況が推測される可能性があります。仮名化は完全な匿名性の保証ではありません。公開Issueやテストには、架空のデータで作った再現例だけを使ってください。
+
+出力先・履歴コピーのアクセス権、バックアップ、端末の共有設定も利用環境に合わせて管理してください。ファイル権限の挙動はOSによって異なり、本ツールは端末上の他のアプリからデータを隔離する仕組みではありません。保存した履歴コピーやレポートは自動削除しません。

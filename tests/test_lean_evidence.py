@@ -21,7 +21,8 @@ class LeanEvidenceTests(unittest.TestCase):
             {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "B" * 20000}},
             {"type": "text", "text": "result text"}]}]
         with tempfile.TemporaryDirectory() as temp:
-            path = Path(temp) / "s.jsonl"
+            # Match snapshot_for: resolve OS aliases such as macOS /var first.
+            path = Path(temp).resolve() / "s.jsonl"
             rows = [{"type": "assistant", "timestamp": "2026-10-01T00:00:00Z", "message": {"role": "assistant", "content": content}},
                     {"type": "user", "timestamp": "2026-10-01T00:00:01Z", "message": {"role": "user", "content": user}}]
             raw = [json.dumps(r) + "\n" for r in rows]

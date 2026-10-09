@@ -12,6 +12,7 @@ a=p.parse_args()
 root=Path(__file__).resolve().parents[1]
 a.output.parent.mkdir(parents=True,exist_ok=True)
 with tempfile.TemporaryDirectory() as t:
+ shutil.copyfile(root/'LICENSE',Path(t)/'LICENSE')
  shutil.copytree(root/'app/claude_history_audit',Path(t)/'claude_history_audit',ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
  (Path(t)/'__main__.py').write_text('from claude_history_audit.sync import main\nraise SystemExit(main())\n',encoding='utf-8')
  zipapp.create_archive(t,target=a.output,compressed=True)

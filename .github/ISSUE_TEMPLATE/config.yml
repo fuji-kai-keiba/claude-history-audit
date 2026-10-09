@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 脆弱性の非公開報告 / Report a vulnerability
+    url: https://github.com/fuji-kai-keiba/claude-history-audit/security/advisories/new
+    about: 情報漏えい等の詳細は公開Issueに書かず、こちらへ報告してください。

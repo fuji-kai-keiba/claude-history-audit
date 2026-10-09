@@ -1,5 +1,14 @@
 # Status
 
+2026-10-09: 公開リポジトリ向けの利用案内と貢献導線を整備。
+
+- MIT License、CONTRIBUTING、SECURITY、Issue/PRテンプレートを追加。READMEに概要・対応範囲・非公式プロジェクトの説明・各文書への導線を追加。
+- ローカルCLIがLLMを呼ばないことと、エージェントによる原文確認がAIセッションの入力になることを明確化。Web連携は別管理の設定を持つ利用者向けと明記。
+- パッケージメタデータにREADME・ライセンス・リポジトリURLを追加。独立導入スキルと配布pyzへLICENSEを同梱し、既存スモークで内容の一致を確認する。
+- 既存の抜粋テストがmacOSの一時フォルダの別名パスをシンボリックリンクとして拒否される問題を確認。実処理のsnapshotと同じくテスト用パスをresolveして渡すよう修正。実装のリンク拒否や監査ロジックは変更していない。
+- 検証: macOS / Python 3.9でunittest 170件成功。独立スキル・配布pyzのLICENSE一致、監査・根拠確認、合成501件/2分割のHTTPS同期スモーク成功。隔離venvでwheelのLICENSE・README・URLメタデータも確認。文書内のローカルファイルリンク16件とCLIヘルプを確認。
+- 起動方法は下記「起動」を参照。独立レビュー・完了状態は末尾のHarness欄で管理。今後の作業は、内部ログ形式変更への追従と既存のWindows検証制約の解消。監査処理の追加機能は今回の対象外。
+
 2026-10-06: 根拠の抜粋から不透明なデータ（thinking の署名・redacted thinking・base64 画像/文書）を省き、件数だけ残すようにした。行の sha256 は元の行のまま。監査を任されたエージェントの最終回答を「改善ポイント表」（優先・改善ポイント・対象・関係する観測額と出典キー・手間・確度・根拠・確かめ方）で締めるよう SKILL.md と CLAUDE.md に明記。
 
 - Windows の実ログ（30日・確認計画73項目）で抜粋の合計 918KB→602KB、文字数上限で切れた抜粋 100→27。
@@ -74,7 +83,7 @@ Windowsでは `py -3 scripts/audit.py --days 30 --open`。
 
 SSH/共有フォルダ取得と、Webへの数値同期を維持。WebのWindowsエージェントはログイン中に15分ごとに同期。Mac/Linux/WSLは手動。実Windowsへの初回導入・定期実行は未検証。既存の公開状況は各リポジトリで管理。
 
-- GitHub: https://github.com/fuji-kai-keiba/claude-history-audit （private）
+- GitHub: https://github.com/fuji-kai-keiba/claude-history-audit （public / MIT）
 - Web: https://github.com/fuji-kai-keiba/claude-history-audit-web （別案件）
 
 未登録端末、削除済み履歴、Enterprise API接続、請求との自動突合、変更した引数での再試行検出、成果物品質の自動判定は対象外。Web同期は端末全履歴を毎回集計。差分同期・大量結果のストリーミング出力は今後の拡張。
@@ -84,9 +93,9 @@ SSH/共有フォルダ取得と、Webへの数値同期を維持。WebのWindows
 <!-- harness:start -->
 ## Harness
 
-- Task: 344a250b5852 / Codex履歴の正式監査と待機反復の自動検出
+- Task: f17176aabc23 / 公開リポジトリのライセンス・利用案内・貢献導線を整備
 - 状態: done
 - 次の作業: 完了。変更が生じた場合は再検証する
 - 試行: 0/3
-- 記録: .harness/344a250b5852/task.json
+- 記録: .harness/f17176aabc23/task.json
 <!-- harness:end -->

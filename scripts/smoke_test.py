@@ -24,6 +24,7 @@ def main():
         source.write_text("".join(json.dumps(r) + "\n" for r in rows))
         before = hashlib.sha256(source.read_bytes()).hexdigest()
         subprocess.run([sys.executable, str(ROOT / "scripts" / "install_skill.py"), "--destination", str(folder / "skill")], check=True, capture_output=True)
+        assert (folder / "skill" / "LICENSE").read_bytes() == (ROOT / "LICENSE").read_bytes()
         runner = folder / "skill" / "scripts" / "run.py"
         subprocess.run([sys.executable, str(runner), "--source", str(source), "--all", "--output", str(folder / "report")], check=True, capture_output=True, cwd=str(folder))
         for name in ("report.json", "summary.md", "report.html", "local-map.json"):
@@ -144,6 +145,7 @@ def main():
         bundle = folder / 'audit-agent.pyz'
         subprocess.run([sys.executable, str(ROOT / 'scripts/build_agent.py'), '--output', str(bundle)], check=True, capture_output=True)
         with zipfile.ZipFile(bundle) as z:
+            assert z.read('LICENSE') == (ROOT / 'LICENSE').read_bytes()
             assert '__main__.py' in z.namelist()
             assert 'claude_history_audit/sync.py' in z.namelist()
             assert not any('device.json' in n or '__pycache__' in n for n in z.namelist())
