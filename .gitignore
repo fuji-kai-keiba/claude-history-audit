@@ -19,3 +19,15 @@ summary.md
 *.private/
 review-plan.json
 review-status.json
+
+# Local connection settings and credentials
+.env
+.env.*
+!.env.example
+device.json
+sources.json
+device*.zip
+*.key
+*.pem
+id_rsa
+id_ed25519

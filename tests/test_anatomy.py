@@ -44,7 +44,7 @@ def session_rows(sid, n, cwd="/synthetic/project", gap_at=None, model="claude-op
 class AnatomyTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.source = self.root / "projects" / "p"
         self.source.mkdir(parents=True)
 

@@ -6,6 +6,7 @@ private local map. Settings describe the current machine, not the historical sta
 import json
 import os
 import re
+import stat
 from pathlib import Path
 
 from .audit import safe_model
@@ -31,8 +32,12 @@ def safe(value):
 
 
 def load(path):
+    checked = local_stat(path)
+    if checked is None:
+        return {}
+    path, info = checked
     try:
-        if path.is_file() and not path.is_symlink() and path.stat().st_size <= MAX_FILE:
+        if stat.S_ISREG(info.st_mode) and info.st_size <= MAX_FILE:
             data = json.loads(path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
@@ -75,11 +80,9 @@ def sanitized_project_dir(cwd):
 
 
 def file_size(path):
-    try:
-        if path.is_file() and not path.is_symlink():
-            return path.stat().st_size
-    except OSError:
-        pass
+    checked = local_stat(path)
+    if checked is not None and stat.S_ISREG(checked[1].st_mode):
+        return checked[1].st_size
     return None
 
 
@@ -96,15 +99,61 @@ def within(target, roots):
 
 
 def network_path(text):
-    return text.startswith(("//", "\\\\")) or "://" in text
+    # Check before Path/stat: UNC, NT device namespaces and mixed separators.
+    return text.replace("\\", "/").startswith("//") or text.startswith("\\") or "://" in text
+
+
+def local_drive(anchor):
+    """Windows drive letters can also refer to network shares."""
+    if os.name != "nt":
+        return True
+    import ctypes
+    from ctypes import wintypes
+    get_type = ctypes.WinDLL("kernel32", use_last_error=True).GetDriveTypeW
+    get_type.argtypes = [wintypes.LPCWSTR]
+    get_type.restype = wintypes.UINT
+    # Removable, fixed, optical and RAM drives; reject remote/unknown roots.
+    return get_type(anchor) in (2, 3, 5, 6)
+
+
+def local_stat(path):
+    """Check each ancestor without following links or Windows reparse points.
+
+    All later reads must use the returned, lexically normalized path. Never
+    resolve an untrusted cwd: resolving a link can itself contact a share.
+    This does not sandbox mounts or concurrent filesystem changes.
+    """
+    text = str(path)
+    if not text or network_path(text) or any(ord(c) < 32 for c in text):
+        return None
+    path = Path(text)
+    if not path.is_absolute():
+        return None
+    path = Path(os.path.abspath(str(path)))
+    try:
+        if not local_drive(path.anchor):
+            return None
+        for part in list(reversed(path.parents)) + [path]:
+            info = part.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                return None
+            if part != path and not stat.S_ISDIR(info.st_mode):
+                return None
+        return path, info
+    except (OSError, ValueError):
+        return None
 
 
 def imports(path, base, roots, unresolved):
     """One level of @imports (Claude Code follows further levels; this is a lower bound).
     Only local paths under the allowed roots are sized; UNC/network paths are never touched."""
     out = []
+    checked = local_stat(path)
+    if checked is None:
+        return out
+    path, info = checked
     try:
-        if file_size(path) is None or path.stat().st_size > MAX_FILE:
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_FILE:
             return out
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -125,15 +174,20 @@ def imports(path, base, roots, unresolved):
             if network_path(str(target)) or not within(target, roots):
                 unresolved.append(raw)
                 continue
-            if file_size(target) is not None:
-                out.append(target)
+            checked_target = local_stat(target)
+            if checked_target is not None and stat.S_ISREG(checked_target[1].st_mode):
+                out.append(checked_target[0])
+            else:
+                unresolved.append(raw)
     return out
 
 
 def instruction_files(cwd, config_dir):
     """CLAUDE.md family that Claude Code loads at startup for this cwd, plus auto-memory index."""
     files, unresolved = [], []
-    roots = [config_dir, Path.home()] + ([Path(cwd)] if cwd else [])
+    checked_cwd = local_stat(cwd) if cwd else None
+    here = checked_cwd[0] if checked_cwd and stat.S_ISDIR(checked_cwd[1].st_mode) else None
+    roots = [config_dir, Path.home()] + ([here] if here else [])
     def add(kind, path):
         size = file_size(path)
         if size is not None and all(p != path for _, p, _ in files):
@@ -144,8 +198,7 @@ def instruction_files(cwd, config_dir):
                     if all(p != target for _, p, _ in files):
                         files.append(("import", target, tsize))
     add("user_claude_md", config_dir / "CLAUDE.md")
-    if cwd:
-        here = Path(cwd)
+    if here is not None:
         for level, directory in enumerate([here] + list(here.parents)):
             if level > 12:
                 break
@@ -172,10 +225,14 @@ def audit_config(config_dir, project_cwds, session_counts=None):
         for kind, path, size in files:
             kinds[kind] = kinds.get(kind, 0) + (size or 0)
             private.setdefault(project, []).append(str(path))
+        checked_cwd = local_stat(cwd) if cwd else None
+        cwd_found = bool(checked_cwd and stat.S_ISDIR(checked_cwd[1].st_mode))
         projects.append({"project": project, "instruction_bytes": sum(kinds.values()), "by_kind": kinds,
                          "files": len(files), "sessions": (session_counts or {}).get(project, 0),
-                         "unresolved_imports": unresolved, "cwd_found": Path(cwd).is_dir() if cwd else False})
+                         "unresolved_imports": unresolved, "cwd_found": cwd_found,
+                         "cwd_status": "local" if cwd_found else "not_inspected"})
     summary["projects"] = projects
     summary["scope"] = ("この端末の現在のユーザー設定と指示ファイル。各セッション当時の設定とは限らない。"
-                        "プロジェクトの .claude/settings.json・実行時の環境変数・管理ポリシーは読まない。取込はcwd・設定・ホーム配下のローカルファイルだけ測る。")
+                        "プロジェクトの .claude/settings.json・実行時の環境変数・管理ポリシーは読まない。取込はcwd・設定・ホーム配下のローカルファイルだけ測る。"
+                        "ネットワーク・デバイス・相対パス、リンク/ジャンクション経由や所在不明のcwdは未確認とする。")
     return summary, private

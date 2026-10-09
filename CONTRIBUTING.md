@@ -13,7 +13,7 @@
 
 ## 開発を始める
 
-Python 3.9以降とGitを用意し、自分のforkをcloneして作業ブランチを作成します。通常の開発・テストに追加パッケージやAPIキーは必要ありません。
+Python 3.13以降（3.9互換を維持）とGitを用意し、自分のforkをcloneして作業ブランチを作成します。通常の開発・テストに追加パッケージやAPIキーは必要ありません。
 
 リポジトリのルートで実行します。Windowsでは `python3` を `py -3` に読み替えてください。
 
@@ -23,7 +23,7 @@ python3 scripts/smoke_test.py
 git diff --check
 ```
 
-スモークテストは一時フォルダ内の合成履歴を使い、スキルの独立インストール、監査、根拠確認、配布用Pythonアプリを確認します。実際のホームディレクトリへスキルを導入する必要はありません。CIはLinuxのPython 3.9 / 3.13で実行します。Windowsの既知の検証制約は [docs/STATUS.md](docs/STATUS.md) を参照してください。
+スモークテストは一時フォルダ内の合成履歴を使い、スキルの独立インストール、監査、根拠確認、配布用Pythonアプリを確認します。実際のホームディレクトリへスキルを導入する必要はありません。CIはLinuxのPython 3.9 / 3.13と、Windowsのパス安全性テストを実行します。Gitleaksで履歴を検査し、GitHub ActionsはコミットIDへ固定してDependabotで更新を確認します。Windowsの既知の検証制約は [docs/STATUS.md](docs/STATUS.md) を参照してください。
 
 ## 構成と変更時の方針
 
